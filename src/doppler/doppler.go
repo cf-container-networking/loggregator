@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -26,6 +27,8 @@ import (
 	"github.com/cloudfoundry/loggregatorlib/store/cache"
 	"github.com/cloudfoundry/sonde-go/events"
 	"github.com/cloudfoundry/storeadapter"
+	"github.com/gogo/protobuf/proto"
+	"github.com/pebbe/zmq4"
 )
 
 type Doppler struct {
@@ -82,6 +85,27 @@ func New(
 
 	doppler.envelopeChan = make(chan *events.Envelope)
 
+	receiver, err := zmq4.NewSocket(zmq4.PULL)
+	if err != nil {
+		panic(err)
+	}
+	err = receiver.Bind("tcp://*:9999")
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		for {
+			bs, err := receiver.RecvBytes(0)
+			if err != nil {
+				log.Print(err.Error())
+			}
+			var env events.Envelope
+			proto.Unmarshal(bs, &env)
+			doppler.envelopeChan <- &env
+		}
+	}()
+
 	doppler.udpListener, doppler.dropsondeBytesChan = listeners.NewUDPListener(
 		fmt.Sprintf("%s:%d", host, config.IncomingUDPPort),
 		doppler.batcher,
@@ -89,7 +113,6 @@ func New(
 		"udpListener",
 	)
 
-	var err error
 	if config.EnableTLSTransport {
 		tlsConfig := &config.TLSListenerConfig
 		addr := fmt.Sprintf("%s:%d", host, tlsConfig.Port)

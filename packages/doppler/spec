@@ -5,6 +5,7 @@ dependencies:
 files:
 - loggregator/src/doppler/LICENSE
 - loggregator/src/doppler/NOTICE
+- loggregator/src/github.com/pebbe/zmq4/*
 - loggregator/src/doppler/*.go # gosub
 - loggregator/src/doppler/config/*.go # gosub
 - loggregator/src/doppler/dopplerservice/*.go # gosub
@@ -59,6 +60,7 @@ files:
 - loggregator/src/github.com/gogo/protobuf/protoc-gen-gogo/descriptor/*.go # gosub
 - loggregator/src/github.com/gorilla/websocket/*.go # gosub
 - loggregator/src/github.com/nu7hatch/gouuid/*.go # gosub
+- loggregator/src/github.com/pebbe/zmq4/*.go # gosub
 - loggregator/src/github.com/pivotal-golang/localip/*.go # gosub
 - loggregator/src/github.com/ugorji/go/codec/*.go # gosub
 - loggregator/src/logger/*.go # gosub

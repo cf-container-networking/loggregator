@@ -1,9 +1,12 @@
 set -e -x
 
+sudo apt-get --assume-yes update
+sudo apt-get --assume-yes install build-essential pkg-config libzmq3 libzmq3-dbg libzmq3-dev
+
 export GOROOT=$(readlink -nf /var/vcap/packages/golang1.7)
 export PATH=$GOROOT/bin:$PATH
 export GOPATH=$PWD/loggregator
 
 go install doppler
 cp -a $PWD/loggregator/bin/doppler ${BOSH_INSTALL_TARGET}
-
+cp -a /usr/lib/x86_64-linux-gnu/* ${BOSH_INSTALL_TARGET}

@@ -12,6 +12,8 @@ source /var/vcap/packages/loggregator_common/syslog_utils.sh
 
 tee_output_to_sys_log "$LOG_DIR"
 
+export LD_LIBRARY_PATH=/var/vcap/packages/metron_agent:$LD_LIBRARY_PATH
+
 case $1 in
 
   start)

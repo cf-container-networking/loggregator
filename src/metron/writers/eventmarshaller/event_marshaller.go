@@ -1,12 +1,13 @@
 package eventmarshaller
 
 import (
-	"sync"
+	"log"
 
 	"github.com/cloudfoundry/dropsonde/metricbatcher"
 	"github.com/cloudfoundry/gosteno"
 	"github.com/cloudfoundry/sonde-go/events"
 	"github.com/gogo/protobuf/proto"
+	"github.com/pebbe/zmq4"
 )
 
 //go:generate hel --type BatchChainByteWriter --output mock_writer_test.go
@@ -28,38 +29,19 @@ type EventBatcher interface {
 
 type EventMarshaller struct {
 	batcher    EventBatcher
+	byteWriter *zmq4.Socket
 	logger     *gosteno.Logger
-	byteWriter BatchChainByteWriter
-	bwLock     sync.RWMutex
 }
 
-func New(batcher EventBatcher, logger *gosteno.Logger) *EventMarshaller {
+func New(batcher EventBatcher, byteWriter *zmq4.Socket, logger *gosteno.Logger) *EventMarshaller {
 	return &EventMarshaller{
-		batcher: batcher,
-		logger:  logger,
+		batcher:    batcher,
+		byteWriter: byteWriter,
+		logger:     logger,
 	}
-}
-
-func (m *EventMarshaller) SetWriter(byteWriter BatchChainByteWriter) {
-	m.bwLock.Lock()
-	defer m.bwLock.Unlock()
-	m.byteWriter = byteWriter
-}
-
-func (m *EventMarshaller) writer() BatchChainByteWriter {
-	m.bwLock.RLock()
-	defer m.bwLock.RUnlock()
-	return m.byteWriter
 }
 
 func (m *EventMarshaller) Write(envelope *events.Envelope) {
-	writer := m.writer()
-	if writer == nil {
-		m.logger.Warn("EventMarshaller: Write called while byteWriter is nil")
-		m.batcher.BatchIncrementCounter("dropsondeMarshaller.nilByteWriterWrites")
-		return
-	}
-
 	envelopeBytes, err := proto.Marshal(envelope)
 	if err != nil {
 		m.logger.Errorf("marshalling error: %v", err)
@@ -67,8 +49,8 @@ func (m *EventMarshaller) Write(envelope *events.Envelope) {
 		return
 	}
 
-	chainer := m.batcher.BatchCounter("dropsondeMarshaller.sentEnvelopes").
-		SetTag("event_type", envelope.GetEventType().String())
-
-	writer.Write(envelopeBytes, chainer)
+	_, err = m.byteWriter.SendBytes(envelopeBytes, 0)
+	if err != nil {
+		log.Print(err.Error())
+	}
 }
