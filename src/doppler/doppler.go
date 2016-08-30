@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	doppler_config "doppler/config"
@@ -27,7 +28,6 @@ import (
 	"github.com/cloudfoundry/loggregatorlib/store/cache"
 	"github.com/cloudfoundry/sonde-go/events"
 	"github.com/cloudfoundry/storeadapter"
-	"github.com/gogo/protobuf/proto"
 	"github.com/pebbe/zmq4"
 )
 
@@ -59,6 +59,8 @@ type Doppler struct {
 	newAppServiceChan, deletedAppServiceChan <-chan appservice.AppService
 	wg                                       sync.WaitGroup
 }
+
+var count uint64
 
 func New(
 	logger *gosteno.Logger,
@@ -95,14 +97,23 @@ func New(
 	}
 
 	go func() {
+		for range time.NewTicker(time.Second).C {
+			rate := atomic.SwapUint64(&count, 0)
+			log.Printf("current rate: %d msg/s", rate)
+		}
+	}()
+
+	go func() {
 		for {
-			bs, err := receiver.RecvBytes(0)
+			_, err := receiver.RecvBytes(0)
 			if err != nil {
 				log.Print(err.Error())
+				continue
 			}
-			var env events.Envelope
-			proto.Unmarshal(bs, &env)
-			doppler.envelopeChan <- &env
+			atomic.AddUint64(&count, 1)
+			//var env events.Envelope
+			//proto.Unmarshal(bs, &env)
+			//doppler.envelopeChan <- &env
 		}
 	}()
 

@@ -132,15 +132,20 @@ func initializeDopplerPool(conf *config.Config, batcher *metricbatcher.MetricBat
 	}
 
 	// Pecan
-	//sender.Connect("tcp://10.10.3.56:9999")
-	//sender.Connect("tcp://10.10.3.61:9999")
-	//sender.Connect("tcp://10.10.3.59:9999")
-	//sender.Connect("tcp://10.10.3.60:9999")
-
-	// Lite
-	err = sender.Connect("tcp://10.244.0.134:9999")
-	if err != nil {
-		panic(err)
+	for _, addr := range []string{
+		// Pecan
+		"tcp://10.10.3.63:9999",
+		"tcp://10.10.3.64:9999",
+		"tcp://10.10.3.65:9999",
+		"tcp://10.10.3.66:9999",
+		// Lite
+		//"tcp://10.244.0.134:9999"
+	} {
+		// Lite
+		err = sender.Connect(addr)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	marshaller := eventmarshaller.New(batcher, sender, logger)
