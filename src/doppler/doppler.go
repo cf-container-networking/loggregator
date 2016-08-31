@@ -60,7 +60,7 @@ type Doppler struct {
 	wg                                       sync.WaitGroup
 }
 
-var count uint64
+//var count uint64
 
 func New(
 	logger *gosteno.Logger,

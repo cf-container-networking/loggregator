@@ -1,6 +1,9 @@
 package listeners
 
 import (
+	"log"
+	"time"
+	//"sync/atomic"
 	"crypto/tls"
 	"crypto/x509"
 	"doppler/config"
@@ -10,13 +13,24 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
-	"strings"
+	//"strings"
 	"sync"
 
 	"github.com/cloudfoundry/dropsonde/dropsonde_unmarshaller"
 	"github.com/cloudfoundry/gosteno"
 	"github.com/cloudfoundry/sonde-go/events"
 )
+
+//var count uint64
+//
+//func init() {
+//	go func() {
+//		for range time.NewTicker(time.Second).C {
+//			rate := atomic.SwapUint64(&count, 0)
+//			log.Printf("current rate: %d msg/s", rate)
+//		}
+//	}()
+//}
 
 type TCPListener struct {
 	envelopeChan   chan *events.Envelope
@@ -210,23 +224,26 @@ func (t *TCPListener) handleConnection(conn net.Conn) {
 			break
 		}
 
-		envelope, err := t.unmarshaller.UnmarshallMessage(read)
-		if err != nil {
-			continue
-		}
-		t.batcher.BatchCounter("listeners.receivedEnvelopes").
-			SetTag("protocol", strings.ToLower(t.protocol)).
-			SetTag("event_type", envelope.EventType.String()).
-			Increment()
-		t.batcher.BatchIncrementCounter("listeners.totalReceivedMessageCount")
-		t.batcher.BatchIncrementCounter(t.metricProto + ".receivedMessageCount")
-		t.batcher.BatchAddCounter(t.metricProto+".receivedByteCount", uint64(n+4))
-		t.batcher.BatchAddCounter("listeners.totalReceivedByteCount", uint64(n+4))
+		//atomic.AddUint64(&count, 1)
+
+		//envelope, err := t.unmarshaller.UnmarshallMessage(read)
+		//if err != nil {
+		//	continue
+		//}
+		//t.batcher.BatchCounter("listeners.receivedEnvelopes").
+		//	SetTag("protocol", strings.ToLower(t.protocol)).
+		//	SetTag("event_type", envelope.EventType.String()).
+		//	Increment()
+		//t.batcher.BatchIncrementCounter("listeners.totalReceivedMessageCount")
+		//t.batcher.BatchIncrementCounter(t.metricProto + ".receivedMessageCount")
+		//t.batcher.BatchAddCounter(t.metricProto+".receivedByteCount", uint64(n+4))
+		//t.batcher.BatchAddCounter("listeners.totalReceivedByteCount", uint64(n+4))
 
 		select {
-		case t.envelopeChan <- envelope:
+		//case t.envelopeChan <- envelope:
 		case <-t.stopped:
 			return
+		default:
 		}
 	}
 }

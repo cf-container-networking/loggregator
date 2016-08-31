@@ -2,6 +2,7 @@ package listeners
 
 import (
 	"net"
+	//"sync/atomic"
 	"sync"
 
 	"github.com/cloudfoundry/gosteno"
@@ -58,16 +59,18 @@ func (l *UDPListener) Start() {
 		readData := make([]byte, readCount) //pass on buffer in size only of read data
 		copy(readData, readBuffer[:readCount])
 
+		//atomic.AddUint64(&count, 1)
+
 		// TODO: will be deprecated
-		l.batcher.BatchIncrementCounter("dropsondeListener.receivedMessageCount")
-		l.batcher.BatchAddCounter("dropsondeListener.receivedByteCount", uint64(readCount))
+		//l.batcher.BatchIncrementCounter("dropsondeListener.receivedMessageCount")
+		//l.batcher.BatchAddCounter("dropsondeListener.receivedByteCount", uint64(readCount))
 
-		l.batcher.BatchIncrementCounter(l.metricProto + ".receivedMessageCount")
-		l.batcher.BatchIncrementCounter("listeners.totalReceivedMessageCount")
-		l.batcher.BatchAddCounter(l.metricProto+".receivedByteCount", uint64(readCount))
-		l.batcher.BatchAddCounter("listeners.totalReceivedByteCount", uint64(readCount))
+		//l.batcher.BatchIncrementCounter(l.metricProto + ".receivedMessageCount")
+		//l.batcher.BatchIncrementCounter("listeners.totalReceivedMessageCount")
+		//l.batcher.BatchAddCounter(l.metricProto+".receivedByteCount", uint64(readCount))
+		//l.batcher.BatchAddCounter("listeners.totalReceivedByteCount", uint64(readCount))
 
-		l.dataChannel <- readData
+		//l.dataChannel <- readData
 	}
 }
 
