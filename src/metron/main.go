@@ -134,10 +134,10 @@ func initializeDopplerPool(conf *config.Config, batcher *metricbatcher.MetricBat
 	// Pecan
 	for _, addr := range []string{
 		// Pecan
-		"tcp://10.10.3.63:9999",
 		"tcp://10.10.3.64:9999",
 		"tcp://10.10.3.65:9999",
 		"tcp://10.10.3.66:9999",
+		"tcp://10.10.3.67:9999",
 		// Lite
 		//"tcp://10.244.0.134:9999"
 	} {

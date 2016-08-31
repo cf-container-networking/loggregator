@@ -49,7 +49,7 @@ func (m *EventMarshaller) Write(envelope *events.Envelope) {
 		return
 	}
 
-	_, err = m.byteWriter.SendBytes(envelopeBytes, 0)
+	_, err = m.byteWriter.SendBytes(envelopeBytes, zmq4.DONTWAIT)
 	if err != nil {
 		log.Print(err.Error())
 	}
