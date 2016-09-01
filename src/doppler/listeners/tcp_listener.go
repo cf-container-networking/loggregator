@@ -3,7 +3,7 @@ package listeners
 import (
 	"log"
 	"time"
-	//"sync/atomic"
+	"sync/atomic"
 	"crypto/tls"
 	"crypto/x509"
 	"doppler/config"
@@ -21,16 +21,16 @@ import (
 	"github.com/cloudfoundry/sonde-go/events"
 )
 
-//var count uint64
-//
-//func init() {
-//	go func() {
-//		for range time.NewTicker(time.Second).C {
-//			rate := atomic.SwapUint64(&count, 0)
-//			log.Printf("current rate: %d msg/s", rate)
-//		}
-//	}()
-//}
+var count uint64
+
+func init() {
+	go func() {
+		for range time.NewTicker(time.Second).C {
+			rate := atomic.SwapUint64(&count, 0)
+			log.Printf("current rate: %d msg/s", rate)
+		}
+	}()
+}
 
 type TCPListener struct {
 	envelopeChan   chan *events.Envelope
@@ -224,7 +224,7 @@ func (t *TCPListener) handleConnection(conn net.Conn) {
 			break
 		}
 
-		//atomic.AddUint64(&count, 1)
+		atomic.AddUint64(&count, 1)
 
 		//envelope, err := t.unmarshaller.UnmarshallMessage(read)
 		//if err != nil {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"doppler/dopplerservice"
-	"doppler/listeners"
 	"flag"
 	"fmt"
 	"net"
@@ -17,9 +16,6 @@ import (
 	"metron/writers/batch"
 	"metron/writers/dopplerforwarder"
 	"metron/writers/eventmarshaller"
-	"metron/writers/eventunmarshaller"
-	"metron/writers/messageaggregator"
-	"metron/writers/tagger"
 
 	"logger"
 	"metron/eventwriter"
@@ -64,7 +60,7 @@ func main() {
 	logger := logger.NewLogger(*debug, *logFilePath, "metron", config.Syslog)
 
 	statsStopChan := make(chan struct{})
-	batcher, eventWriter := initializeMetrics(config, statsStopChan, logger)
+	batcher, _ := initializeMetrics(config, statsStopChan, logger)
 
 	go func() {
 		err := http.ListenAndServe(net.JoinHostPort("localhost", pprofPort), nil)
@@ -74,18 +70,18 @@ func main() {
 	}()
 
 	logger.Info("Startup: Setting up the Metron agent")
-	marshaller, err := initializeDopplerPool(config, batcher, logger)
+	batchWriter, err := initializeDopplerPool(config, batcher, logger)
 	if err != nil {
 		panic(fmt.Errorf("Could not initialize doppler connection pool: %s", err))
 	}
 
-	messageTagger := tagger.New(config.Deployment, config.Job, config.Index, marshaller)
-	aggregator := messageaggregator.New(messageTagger, logger)
-	eventWriter.SetWriter(aggregator)
+	//messageTagger := tagger.New(config.Deployment, config.Job, config.Index, marshaller)
+	//aggregator := messageaggregator.New(messageTagger, logger)
+	//eventWriter.SetWriter(marshaller)
 
-	dropsondeUnmarshaller := eventunmarshaller.New(aggregator, batcher, logger)
+	//dropsondeUnmarshaller := eventunmarshaller.New(aggregator, batcher, logger)
 	metronAddress := fmt.Sprintf("127.0.0.1:%d", config.IncomingUDPPort)
-	dropsondeReader, err := networkreader.New(metronAddress, "dropsondeAgentListener", dropsondeUnmarshaller, logger)
+	dropsondeReader, err := networkreader.New(metronAddress, "dropsondeAgentListener", batchWriter, logger)
 	if err != nil {
 		panic(fmt.Errorf("Failed to listen on %s: %s", metronAddress, err))
 	}
@@ -122,12 +118,11 @@ func adapter(conf *config.Config, logger *gosteno.Logger) (storeadapter.StoreAda
 	return adapter, nil
 }
 
-func initializeDopplerPool(conf *config.Config, batcher *metricbatcher.MetricBatcher, logger *gosteno.Logger) (*eventmarshaller.EventMarshaller, error) {
+func initializeDopplerPool(conf *config.Config, batcher *metricbatcher.MetricBatcher, logger *gosteno.Logger) (eventmarshaller.BatchChainByteWriter, error) {
 	adapter, err := adapter(conf, logger)
 	if err != nil {
 		return nil, err
 	}
-	var protocols []string
 	clientPool := make(map[string]clientreader.ClientPool)
 	writers := make(map[string]eventmarshaller.BatchChainByteWriter)
 
@@ -136,83 +131,43 @@ func initializeDopplerPool(conf *config.Config, batcher *metricbatcher.MetricBat
 		return nil, err
 	}
 
-	for protocol := range conf.Protocols {
-		proto := string(protocol)
-		protocols = append(protocols, proto)
-		switch proto {
-		case "udp":
-			udpCreator := clientpool.NewUDPClientCreator(logger)
-			udpWrapper := dopplerforwarder.NewUDPWrapper([]byte(conf.SharedSecret), logger)
-			udpPool := clientpool.NewDopplerPool(logger, udpCreator)
-			udpForwarder := dopplerforwarder.New(udpWrapper, udpPool, logger)
-			clientPool[proto] = udpPool
-			writers[proto] = udpForwarder
-		case "tcp":
-			tcpCreator := clientpool.NewTCPClientCreator(logger, nil)
-			tcpWrapper := dopplerforwarder.NewWrapper(logger, proto)
-			tcpPool := clientpool.NewDopplerPool(logger, tcpCreator)
-			tcpForwarder := dopplerforwarder.New(tcpWrapper, tcpPool, logger)
+	proto := "tcp"
+	tcpCreator := clientpool.NewTCPClientCreator(logger, nil)
+	tcpWrapper := dopplerforwarder.NewWrapper(logger, proto)
+	tcpPool := clientpool.NewDopplerPool(logger, tcpCreator)
+	tcpForwarder := dopplerforwarder.New(tcpWrapper, tcpPool, logger)
 
-			tcpBatchInterval := time.Duration(conf.TCPBatchIntervalMilliseconds) * time.Millisecond
+	tcpBatchInterval := time.Duration(conf.TCPBatchIntervalMilliseconds) * time.Millisecond
 
-			dropCounter := batch.NewDroppedCounter(tcpForwarder, batcher, origin, ip, conf)
-			batchWriter, err := batch.NewWriter(
-				"tcp",
-				tcpForwarder,
-				dropCounter,
-				conf.TCPBatchSizeBytes,
-				tcpBatchInterval,
-				logger,
-			)
-			if err != nil {
-				return nil, err
-			}
-			clientPool[proto] = tcpPool
-			writers[proto] = batchWriter
-		case "tls":
-			c := conf.TLSConfig
-			tlsConfig, err := listeners.NewTLSConfig(c.CertFile, c.KeyFile, c.CAFile)
-			if err != nil {
-				return nil, err
-			}
-			tlsConfig.ServerName = "doppler"
-			tlsCreator := clientpool.NewTCPClientCreator(logger, tlsConfig)
-			tlsWrapper := dopplerforwarder.NewWrapper(logger, proto)
-			tlsPool := clientpool.NewDopplerPool(logger, tlsCreator)
-			tlsForwarder := dopplerforwarder.New(tlsWrapper, tlsPool, logger)
-			tcpBatchInterval := time.Duration(conf.TCPBatchIntervalMilliseconds) * time.Millisecond
-
-			dropCounter := batch.NewDroppedCounter(tlsForwarder, batcher, origin, ip, conf)
-			batchWriter, err := batch.NewWriter(
-				"tls",
-				tlsForwarder,
-				dropCounter,
-				conf.TCPBatchSizeBytes,
-				tcpBatchInterval,
-				logger,
-			)
-			if err != nil {
-				return nil, err
-			}
-			clientPool[proto] = tlsPool
-			writers[proto] = batchWriter
-		}
+	dropCounter := batch.NewDroppedCounter(tcpForwarder, batcher, origin, ip, conf)
+	batchWriter, err := batch.NewWriter(
+		"tcp",
+		tcpForwarder,
+		dropCounter,
+		conf.TCPBatchSizeBytes,
+		tcpBatchInterval,
+		logger,
+	)
+	if err != nil {
+		return nil, err
 	}
+	clientPool[proto] = tcpPool
+	writers[proto] = batchWriter
 
 	finder := dopplerservice.NewFinder(adapter, conf.LoggregatorDropsondePort, conf.Protocols.Strings(), conf.Zone, logger)
 	finder.Start()
 
-	marshaller := eventmarshaller.New(batcher, logger)
+	//	marshaller := eventmarshaller.New(batcher, logger)
 
 	go func() {
 		for {
 			protocol := clientreader.Read(clientPool, conf.Protocols.Strings(), finder.Next())
 			logger.Infof("Chose protocol %s from last etcd event, updating writer...", protocol)
-			marshaller.SetWriter(writers[protocol])
+			//	marshaller.SetWriter(writers[protocol])
 		}
 	}()
 
-	return marshaller, nil
+	return batchWriter, nil
 }
 
 func initializeMetrics(config *config.Config, stopChan chan struct{}, logger *gosteno.Logger) (*metricbatcher.MetricBatcher, *eventwriter.EventWriter) {

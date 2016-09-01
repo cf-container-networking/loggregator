@@ -3,7 +3,7 @@ package networkreader
 import (
 	"net"
 
-	"metron/writers"
+	"metron/writers/eventmarshaller"
 
 	"github.com/cloudfoundry/dropsonde/logging"
 	"github.com/cloudfoundry/dropsonde/metrics"
@@ -12,14 +12,14 @@ import (
 
 type NetworkReader struct {
 	connection net.PacketConn
-	writer     writers.ByteArrayWriter
+	writer     eventmarshaller.BatchChainByteWriter
 
 	contextName string
 
 	logger *gosteno.Logger
 }
 
-func New(address string, name string, writer writers.ByteArrayWriter, logger *gosteno.Logger) (*NetworkReader, error) {
+func New(address string, name string, writer eventmarshaller.BatchChainByteWriter, logger *gosteno.Logger) (*NetworkReader, error) {
 	connection, err := net.ListenPacket("udp4", address)
 	if err != nil {
 		return nil, err
