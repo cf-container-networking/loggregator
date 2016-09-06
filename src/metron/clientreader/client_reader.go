@@ -1,9 +1,6 @@
 package clientreader
 
-import (
-	"doppler/dopplerservice"
-	"fmt"
-)
+import "fmt"
 
 //go:generate hel --type ClientPool --output mock_client_pool_test.go
 
@@ -11,8 +8,8 @@ type ClientPool interface {
 	SetAddresses(addresses []string) int
 }
 
-func Read(clientPool map[string]ClientPool, protocols []string, event dopplerservice.Event) string {
-	protocol, servers := chooseProtocol(protocols, event)
+func Read(clientPool map[string]ClientPool, protocols []string, dopplers map[string][]string) string {
+	protocol, servers := chooseProtocol(protocols, dopplers)
 	if protocol == "" {
 		panic(fmt.Sprintf("No dopplers listening on %v", protocols))
 	}
@@ -23,19 +20,19 @@ func Read(clientPool map[string]ClientPool, protocols []string, event dopplerser
 	return protocol
 }
 
-func chooseProtocol(protocols []string, event dopplerservice.Event) (string, []string) {
+func chooseProtocol(protocols []string, dopplers map[string][]string) (string, []string) {
 	for _, protocol := range protocols {
-		var dopplers []string
+		var result []string
 		switch protocol {
 		case "udp":
-			dopplers = event.UDPDopplers
+			result = dopplers["udp"]
 		case "tcp":
-			dopplers = event.TCPDopplers
+			result = dopplers["tcp"]
 		case "tls":
-			dopplers = event.TLSDopplers
+			result = dopplers["tls"]
 		}
-		if len(dopplers) > 0 {
-			return protocol, dopplers
+		if len(result) > 0 {
+			return protocol, result
 		}
 	}
 	return "", nil

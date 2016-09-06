@@ -7,7 +7,6 @@ files:
 - loggregator/src/metron/NOTICE
 - loggregator/src/metron/syslog_daemon_config/*
 - loggregator/src/doppler/config/*.go # gosub
-- loggregator/src/doppler/dopplerservice/*.go # gosub
 - loggregator/src/doppler/iprange/*.go # gosub
 - loggregator/src/doppler/listeners/*.go # gosub
 - loggregator/src/doppler/sinks/retrystrategy/*.go # gosub

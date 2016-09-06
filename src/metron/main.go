@@ -1,11 +1,12 @@
 package main
 
 import (
-	"doppler/dopplerservice"
 	"doppler/listeners"
 	"doppler/sinks/retrystrategy"
+	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -195,20 +196,91 @@ func initializeDopplerPool(conf *config.Config, batcher *metricbatcher.MetricBat
 		}
 	}
 
-	finder := dopplerservice.NewFinder(adapter, conf.LoggregatorDropsondePort, conf.Protocols.Strings(), conf.Zone, logger)
-	finder.Start()
-
 	marshaller := eventmarshaller.New(batcher, logger)
 
 	go func() {
+		t := time.NewTicker(time.Second * 5)
 		for {
-			protocol := clientreader.Read(clientPool, conf.Protocols.Strings(), finder.Next())
+			_, enableTLS := conf.Protocols["tls"]
+			dopplers, err := dopplers(conf.Zone, enableTLS)
+			if err != nil {
+				log.Printf("got error while looking for dopplers via consul: %s", err)
+				<-t.C
+				continue
+			}
+			protocol := clientreader.Read(clientPool, conf.Protocols.Strings(), dopplers)
 			logger.Infof("Chose protocol %s from last etcd event, updating writer...", protocol)
 			marshaller.SetWriter(writers[protocol])
+			<-t.C
 		}
 	}()
 
 	return marshaller, nil
+}
+
+func dopplers(az string, enableTLS bool) (map[string][]string, error) {
+	log.Print("finding dopplers from consul")
+	dopplers := make(map[string][]string)
+
+	udp, err := net.LookupHost("udp.doppler.service.cf.internal")
+	if err != nil {
+		return nil, err
+	}
+	if len(udp) > 0 {
+		dopplers["udp"] = udp
+	}
+
+	tcp, err := net.LookupHost("tcp.doppler.service.cf.internal")
+	if err != nil {
+		return nil, err
+	}
+	if len(tcp) > 0 {
+		dopplers["tcp"] = tcp
+	}
+
+	if enableTLS {
+		tls, err := net.LookupHost("tls.doppler.service.cf.internal")
+		if err != nil {
+			return nil, err
+		}
+		if len(tls) > 0 {
+			dopplers["tls"] = tls
+		}
+	}
+	zone, err := net.LookupHost(az + ".doppler.service.cf.internal")
+	if err != nil {
+		return nil, err
+	}
+	if len(zone) > 0 {
+		dopplers["zone"] = zone
+	}
+
+	result := recommended(dopplers)
+	if len(result) == 0 {
+		return nil, errors.New("0 dopplers found")
+	}
+	log.Printf("result %+v", result)
+	return result, nil
+}
+
+func recommended(d map[string][]string) map[string][]string {
+	_, ok := d["zone"]
+	if !ok {
+		return d
+	}
+
+	result := make(map[string][]string)
+	for _, addr := range d["udp"] {
+		result["udp"] = append(result["udp"], addr+":3457")
+	}
+	for _, addr := range d["tcp"] {
+		result["tcp"] = append(result["tcp"], addr+":3458")
+	}
+	for _, addr := range d["tls"] {
+		result["tls"] = append(result["tls"], addr+":3459")
+	}
+
+	return result
 }
 
 func initializeMetrics(config *config.Config, stopChan chan struct{}, logger *gosteno.Logger) (*metricbatcher.MetricBatcher, *eventwriter.EventWriter) {
