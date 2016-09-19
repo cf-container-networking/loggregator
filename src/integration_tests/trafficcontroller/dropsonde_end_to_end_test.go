@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"plumbing"
 	"strconv"
 	"time"
 
@@ -30,7 +31,7 @@ var _ = Describe("TrafficController for dropsonde messages", func() {
 		fakeDoppler.Stop()
 	})
 
-	Context("Streaming", func() {
+	FContext("Streaming", func() {
 		var (
 			client   *consumer.Consumer
 			messages <-chan *events.Envelope
@@ -43,13 +44,18 @@ var _ = Describe("TrafficController for dropsonde messages", func() {
 		})
 
 		It("passes messages through", func() {
+			time.Sleep(10 * time.Second)
 			var request *http.Request
 			Eventually(fakeDoppler.TrafficControllerConnected, 10).Should(Receive(&request))
 			Expect(request.URL.Path).To(Equal("/apps/1234/stream"))
 
 			currentTime := time.Now().UnixNano()
 			dropsondeMessage := makeDropsondeMessage("Hello through NOAA", APP_ID, currentTime)
-			fakeDoppler.SendLogMessage(dropsondeMessage)
+			fakeDoppler.SendLogMessageViaGrpc(dropsondeMessage)
+
+			var grpcRequest *plumbing.StreamRequest
+			Eventually(fakeDoppler.GrpcStreamRequestChan).Should(Receive(&grpcRequest))
+			Expect(grpcRequest.AppID).To(Equal(APP_ID))
 
 			var receivedEnvelope *events.Envelope
 			Eventually(messages).Should(Receive(&receivedEnvelope))

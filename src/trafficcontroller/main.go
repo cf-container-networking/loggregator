@@ -134,14 +134,14 @@ func main() {
 	}
 
 	dopplerCgc := channel_group_connector.NewChannelGroupConnector(finder, newDropsondeWebsocketListener, marshaller.DropsondeLogMessage, batcher, log)
-	dopplerHandler := http.Handler(dopplerproxy.NewDopplerProxy(logAuthorizer, adminAuthorizer, dopplerCgc, dopplerproxy.TranslateFromDropsondePath, "doppler."+config.SystemDomain, log))
+	dopplerHandler := http.Handler(dopplerproxy.NewDopplerProxy(logAuthorizer, adminAuthorizer, dopplerCgc, nil, dopplerproxy.TranslateFromDropsondePath, "doppler."+config.SystemDomain, log))
 	if accessMiddleware != nil {
 		dopplerHandler = accessMiddleware(dopplerHandler)
 	}
 	startOutgoingProxy(net.JoinHostPort(ipAddress, strconv.FormatUint(uint64(config.OutgoingDropsondePort), 10)), dopplerHandler)
 
 	legacyCgc := channel_group_connector.NewChannelGroupConnector(finder, newLegacyWebsocketListener, marshaller.LoggregatorLogMessage, batcher, log)
-	legacyHandler := http.Handler(dopplerproxy.NewDopplerProxy(logAuthorizer, adminAuthorizer, legacyCgc, dopplerproxy.TranslateFromLegacyPath, "loggregator."+config.SystemDomain, log))
+	legacyHandler := http.Handler(dopplerproxy.NewDopplerProxy(logAuthorizer, adminAuthorizer, legacyCgc, nil, dopplerproxy.TranslateFromLegacyPath, "loggregator."+config.SystemDomain, log))
 	if legacyAccessMiddleware != nil {
 		legacyHandler = legacyAccessMiddleware(legacyHandler)
 	}

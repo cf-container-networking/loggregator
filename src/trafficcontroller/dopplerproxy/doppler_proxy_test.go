@@ -1,6 +1,11 @@
+//go:generate hel
 package dopplerproxy_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"plumbing"
 	"trafficcontroller/dopplerproxy"
 
 	"io/ioutil"
@@ -13,7 +18,9 @@ import (
 
 	"github.com/cloudfoundry/loggregatorlib/loggertesthelper"
 	"github.com/cloudfoundry/loggregatorlib/server/handlers"
+	"github.com/gorilla/websocket"
 
+	. "github.com/apoydence/eachers"
 	"github.com/cloudfoundry/dropsonde/metric_sender/fake"
 	"github.com/cloudfoundry/dropsonde/metricbatcher"
 	"github.com/cloudfoundry/dropsonde/metrics"
@@ -21,18 +28,29 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("ServeHTTP", func() {
+var _ = Describe("ServeHTTP()", func() {
 	var (
 		auth                  LogAuthorizer
 		adminAuth             AdminAuthorizer
 		proxy                 *dopplerproxy.Proxy
 		recorder              *httptest.ResponseRecorder
 		channelGroupConnector *fakeChannelGroupConnector
+
+		mockGrpcConnector         *mockGrpcConnector
+		mockDopplerStreamClient   *mockDoppler_StreamClient
+		mockDopplerFirehoseClient *mockDoppler_FirehoseClient
 	)
 
 	BeforeEach(func() {
 		auth = LogAuthorizer{Result: AuthorizerResult{Status: http.StatusOK}}
 		adminAuth = AdminAuthorizer{Result: AuthorizerResult{Status: http.StatusOK}}
+		mockGrpcConnector = newMockGrpcConnector()
+
+		mockDopplerStreamClient = newMockDoppler_StreamClient()
+		mockDopplerFirehoseClient = newMockDoppler_FirehoseClient()
+
+		mockGrpcConnector.StreamOutput.Ret0 <- mockDopplerStreamClient
+		mockGrpcConnector.FirehoseOutput.Ret0 <- mockDopplerFirehoseClient
 
 		channelGroupConnector = &fakeChannelGroupConnector{messages: make(chan []byte, 10)}
 
@@ -40,12 +58,27 @@ var _ = Describe("ServeHTTP", func() {
 			auth.Authorize,
 			adminAuth.Authorize,
 			channelGroupConnector,
+			mockGrpcConnector,
 			dopplerproxy.TranslateFromDropsondePath,
 			"cookieDomain",
 			loggertesthelper.Logger(),
 		)
 
 		recorder = httptest.NewRecorder()
+	})
+
+	JustBeforeEach(func() {
+		close(mockGrpcConnector.StreamOutput.Ret0)
+		close(mockGrpcConnector.StreamOutput.Ret1)
+
+		close(mockGrpcConnector.FirehoseOutput.Ret0)
+		close(mockGrpcConnector.FirehoseOutput.Ret1)
+
+		close(mockDopplerStreamClient.RecvOutput.Ret0)
+		close(mockDopplerStreamClient.RecvOutput.Ret1)
+
+		close(mockDopplerFirehoseClient.RecvOutput.Ret0)
+		close(mockDopplerFirehoseClient.RecvOutput.Ret1)
 	})
 
 	Context("App Logs", func() {
@@ -57,7 +90,7 @@ var _ = Describe("ServeHTTP", func() {
 			Expect(recorder.Code).To(Equal(http.StatusOK))
 		})
 
-		Context("metrices", func() {
+		Describe("TrafficController emitted request metrics", func() {
 			var fakeMetricSender *fake.FakeMetricSender
 
 			BeforeEach(func() {
@@ -76,6 +109,7 @@ var _ = Describe("ServeHTTP", func() {
 				Expect(metric.Value).To(BeNumerically("<", elapsed))
 
 			}
+
 			It("Should emit value metric for recentlogs request", func() {
 				close(channelGroupConnector.messages)
 				req, _ := http.NewRequest("GET", "/apps/appID123/recentlogs", nil)
@@ -198,16 +232,14 @@ var _ = Describe("ServeHTTP", func() {
 				Expect(recorder.Body.String()).To(Equal(http.StatusText(http.StatusUnauthorized)))
 			})
 
-			It("It does not attempt to connect to doppler", func() {
+			It("does not attempt to connect to doppler", func() {
 				auth.Result = AuthorizerResult{Status: http.StatusUnauthorized, ErrorMessage: "Authorization Failed"}
 
 				req, _ := http.NewRequest("GET", "/apps/abc123/stream", nil)
 				req.Header.Add("Authorization", "token")
 
 				proxy.ServeHTTP(recorder, req)
-				Consistently(channelGroupConnector.getPath).Should(Equal(""))
-				Consistently(channelGroupConnector.getStreamId).Should(Equal(""))
-				Consistently(channelGroupConnector.getReconnect).Should(BeFalse())
+				Consistently(mockGrpcConnector.StreamCalled).ShouldNot(Receive())
 			})
 		})
 
@@ -229,8 +261,10 @@ var _ = Describe("ServeHTTP", func() {
 
 			proxy.ServeHTTP(recorder, req)
 
-			Eventually(channelGroupConnector.getPath).Should(Equal("stream"))
-			Eventually(channelGroupConnector.getReconnect).Should(BeTrue())
+			Eventually(mockGrpcConnector.StreamCalled).Should(Receive())
+
+			Expect(mockGrpcConnector.StreamInput.Ctx).To(Receive(Not(BeNil())))
+			Expect(mockGrpcConnector.StreamInput.In).To(Receive(Equal(&plumbing.StreamRequest{"abc123"})))
 		})
 
 		It("connects to doppler servers without reconnecting for recentlogs", func() {
@@ -269,13 +303,25 @@ var _ = Describe("ServeHTTP", func() {
 			Expect(responseBody).To(ContainSubstring("goodbye"))
 		})
 
-		It("stops the connector when the handler finishes", func() {
-			req, _ := http.NewRequest("GET", "/apps/abc123/stream", nil)
+		It("stops the channel connector when the client closes its connection", func() {
+			close(channelGroupConnector.messages)
+			req, _ := http.NewRequest("GET", "/apps/abc123/recentlogs", nil)
 			req.Header.Add("Authorization", "token")
 
 			proxy.ServeHTTP(recorder, req)
 
 			Eventually(channelGroupConnector.Stopped).Should(BeTrue())
+		})
+
+		It("stops the connector when the client closes its connection", func() {
+			req, _ := http.NewRequest("GET", "/apps/abc123/stream", nil)
+			req.Header.Add("Authorization", "token")
+
+			proxy.ServeHTTP(recorder, req)
+
+			var ctx context.Context
+			Eventually(mockGrpcConnector.StreamInput.Ctx).Should(Receive(&ctx))
+			Eventually(ctx.Done).Should(BeClosed())
 		})
 	})
 
@@ -287,9 +333,10 @@ var _ = Describe("ServeHTTP", func() {
 
 				proxy.ServeHTTP(recorder, req)
 
-				Eventually(channelGroupConnector.getPath).Should(Equal("firehose"))
-				Eventually(channelGroupConnector.getStreamId).Should(Equal("abc-123"))
-				Eventually(channelGroupConnector.getReconnect).Should(BeTrue())
+				expectedRequest := &plumbing.FirehoseRequest{
+					SubID: "abc-123",
+				}
+				Eventually(mockGrpcConnector.FirehoseInput.In).Should(BeCalled(With(expectedRequest)))
 			})
 
 			It("returns an unauthorized status and sets the WWW-Authenticate header if authorization fails", func() {
@@ -323,9 +370,7 @@ var _ = Describe("ServeHTTP", func() {
 				req.Header.Add("Authorization", "token")
 
 				proxy.ServeHTTP(recorder, req)
-				Consistently(channelGroupConnector.getPath).Should(Equal(""))
-				Consistently(channelGroupConnector.getStreamId).Should(Equal(""))
-				Consistently(channelGroupConnector.getReconnect).Should(BeFalse())
+				Consistently(mockGrpcConnector.FirehoseCalled).ShouldNot(Receive())
 			})
 		})
 
@@ -344,9 +389,7 @@ var _ = Describe("ServeHTTP", func() {
 				req.Header.Add("Authorization", "token")
 
 				proxy.ServeHTTP(recorder, req)
-				Consistently(channelGroupConnector.getPath).Should(Equal(""))
-				Consistently(channelGroupConnector.getStreamId).Should(Equal(""))
-				Consistently(channelGroupConnector.getReconnect).Should(BeFalse())
+				Consistently(mockGrpcConnector.FirehoseCalled).ShouldNot(Receive())
 			})
 		})
 
@@ -365,9 +408,7 @@ var _ = Describe("ServeHTTP", func() {
 				req.Header.Add("Authorization", "token")
 
 				proxy.ServeHTTP(recorder, req)
-				Consistently(channelGroupConnector.getPath).Should(Equal(""))
-				Consistently(channelGroupConnector.getStreamId).Should(Equal(""))
-				Consistently(channelGroupConnector.getReconnect).Should(BeFalse())
+				Consistently(mockGrpcConnector.FirehoseCalled).ShouldNot(Receive())
 			})
 		})
 
@@ -385,9 +426,7 @@ var _ = Describe("ServeHTTP", func() {
 				req.Header.Add("Authorization", "token")
 
 				proxy.ServeHTTP(recorder, req)
-				Consistently(channelGroupConnector.getPath).Should(Equal(""))
-				Consistently(channelGroupConnector.getStreamId).Should(Equal(""))
-				Consistently(channelGroupConnector.getReconnect).Should(BeFalse())
+				Consistently(mockGrpcConnector.FirehoseCalled).ShouldNot(Receive())
 			})
 		})
 
@@ -397,9 +436,8 @@ var _ = Describe("ServeHTTP", func() {
 				req.Header.Add("Authorization", "token")
 
 				proxy.ServeHTTP(recorder, req)
-				Consistently(channelGroupConnector.getPath).ShouldNot(Equal("firehose"))
-				Eventually(channelGroupConnector.getStreamId).Should(Equal("firehose"))
-				Eventually(channelGroupConnector.getReconnect).Should(BeTrue())
+				Consistently(mockGrpcConnector.FirehoseCalled).ShouldNot(Receive())
+				Eventually(mockGrpcConnector.StreamInput.In).Should(Receive(Equal(&plumbing.StreamRequest{"firehose"})))
 			})
 		})
 	})
@@ -457,6 +495,124 @@ var _ = Describe("ServeHTTP", func() {
 
 			Expect(recorder.Header().Get("Access-Control-Allow-Origin")).To(Equal("fake-origin-string"))
 			Expect(recorder.Header().Get("Access-Control-Allow-Credentials")).To(Equal("true"))
+		})
+	})
+
+	Describe("Streaming Data", func() {
+		var (
+			server *httptest.Server
+		)
+
+		var wsEndpoint = func(path string) string {
+			return strings.Replace(server.URL, "http", "ws", 1) + path
+		}
+
+		BeforeEach(func() {
+			server = httptest.NewServer(proxy)
+		})
+
+		AfterEach(func() {
+			server.CloseClientConnections()
+		})
+
+		Describe("/stream & /firehose", func() {
+			var (
+				expectedData []byte
+			)
+
+			BeforeEach(func() {
+				expectedData = []byte("hello")
+				mockDopplerStreamClient.RecvOutput.Ret0 <- &plumbing.Response{
+					Payload: expectedData,
+				}
+
+				mockDopplerFirehoseClient.RecvOutput.Ret0 <- &plumbing.Response{
+					Payload: expectedData,
+				}
+			})
+
+			It("/stream sends data to the client websocket connection", func(done Done) {
+				defer close(done)
+				conn, _, err := websocket.DefaultDialer.Dial(
+					wsEndpoint("/apps/abc123/stream"),
+					http.Header{"Authorization": []string{"token"}},
+				)
+				Expect(err).ToNot(HaveOccurred())
+
+				_, data, err := conn.ReadMessage()
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(data).To(Equal(expectedData))
+			})
+
+			It("/firehose sends data to the client websocket connection", func(done Done) {
+				defer close(done)
+				conn, _, err := websocket.DefaultDialer.Dial(
+					wsEndpoint("/firehose/subscription-id"),
+					http.Header{"Authorization": []string{"token"}},
+				)
+				Expect(err).ToNot(HaveOccurred())
+
+				_, data, err := conn.ReadMessage()
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(data).To(Equal(expectedData))
+			})
+
+			Context("with doppler's stream endpoint returning an error", func() {
+				BeforeEach(func() {
+					mockGrpcConnector.StreamOutput.Ret1 <- fmt.Errorf("some-error")
+				})
+
+				It("writes a 500", func(done Done) {
+					defer close(done)
+					_, resp, err := websocket.DefaultDialer.Dial(
+						wsEndpoint("/apps/abc123/stream"),
+						http.Header{"Authorization": []string{"token"}},
+					)
+					Expect(err).To(HaveOccurred())
+
+					Expect(resp.StatusCode).To(Equal(http.StatusInternalServerError))
+				})
+			})
+
+			Context("with doppler's firehose endpoint returning an error", func() {
+				BeforeEach(func() {
+					mockGrpcConnector.FirehoseOutput.Ret1 <- fmt.Errorf("some-error")
+				})
+
+				It("writes a 500", func(done Done) {
+					defer close(done)
+					_, resp, err := websocket.DefaultDialer.Dial(
+						wsEndpoint("/firehose/abc123"),
+						http.Header{"Authorization": []string{"token"}},
+					)
+					Expect(err).To(HaveOccurred())
+
+					Expect(resp.StatusCode).To(Equal(http.StatusInternalServerError))
+				})
+			})
+
+			Context("with GRPC recv returning an error", func() {
+				BeforeEach(func() {
+					mockDopplerFirehoseClient.RecvOutput.Ret1 <- errors.New("foo")
+				})
+
+				It("closes the connection to the client", func(done Done) {
+					defer close(done)
+					conn, _, err := websocket.DefaultDialer.Dial(
+						wsEndpoint("/firehose/subscription-id"),
+						http.Header{"Authorization": []string{"token"}},
+					)
+					Expect(err).ToNot(HaveOccurred())
+
+					f := func() string {
+						_, _, err := conn.ReadMessage()
+						return fmt.Sprintf("%s", err)
+					}
+					Eventually(f).Should(ContainSubstring("websocket: close 1000"))
+				})
+			})
 		})
 	})
 })
