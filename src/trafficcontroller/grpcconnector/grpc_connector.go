@@ -1,19 +1,23 @@
 package grpcconnector
 
 import (
-	"context"
 	"plumbing"
 
+	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
-type Finder interface {
-	GrpcURIs() []string
+type Receiver interface {
+	Recv() (*plumbing.Response, error)
+}
+
+type ReceiveFetcher interface {
+	FetchStream(ctx context.Context, in *plumbing.StreamRequest, opts ...grpc.CallOption) ([]Receiver, error)
+	FetchFirehose(ctx context.Context, in *plumbing.FirehoseRequest, opts ...grpc.CallOption) ([]Receiver, error)
 }
 
 type GrpcConnector struct {
-	finder      Finder
-	grpcClients map[string]*grpcConnInfo
+	fetcher ReceiveFetcher
 }
 
 type grpcConnInfo struct {
@@ -21,17 +25,18 @@ type grpcConnInfo struct {
 	conn          *grpc.ClientConn
 }
 
-func New(finder Finder) *GrpcConnector {
+func New(fetcher ReceiveFetcher) *GrpcConnector {
 	return &GrpcConnector{
-		finder:      finder,
-		grpcClients: make(map[string]*grpcConnInfo),
+		fetcher: fetcher,
 	}
 }
 
-func (g *GrpcConnector) Stream(ctx context.Context, in *plumbing.StreamRequest, opts ...grpc.CallOption) (plumbing.Doppler_StreamClient, error) {
-	return nil, nil
+func (g *GrpcConnector) Stream(ctx context.Context, in *plumbing.StreamRequest, opts ...grpc.CallOption) (Receiver, error) {
+	rxs, err := g.fetcher.FetchStream(ctx, in, opts...)
+	return startCombiner(rxs), err
 }
 
-func (g *GrpcConnector) Firehose(ctx context.Context, in *plumbing.FirehoseRequest, opts ...grpc.CallOption) (plumbing.Doppler_FirehoseClient, error) {
-	return nil, nil
+func (g *GrpcConnector) Firehose(ctx context.Context, in *plumbing.FirehoseRequest, opts ...grpc.CallOption) (Receiver, error) {
+	rxs, err := g.fetcher.FetchFirehose(ctx, in, opts...)
+	return startCombiner(rxs), err
 }
