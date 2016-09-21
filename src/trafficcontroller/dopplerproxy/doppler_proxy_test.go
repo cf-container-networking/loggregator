@@ -59,7 +59,6 @@ var _ = Describe("ServeHTTP()", func() {
 			adminAuth.Authorize,
 			channelGroupConnector,
 			mockGrpcConnector,
-			dopplerproxy.TranslateFromDropsondePath,
 			"cookieDomain",
 			loggertesthelper.Logger(),
 		)

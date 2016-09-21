@@ -25,12 +25,9 @@ type Proxy struct {
 	adminAuthorize authorization.AdminAccessAuthorizer
 	connector      channelGroupConnector
 	grpcConn       grpcConnector
-	translate      RequestTranslator
 	cookieDomain   string
 	logger         *gosteno.Logger
 }
-
-type RequestTranslator func(request *http.Request) (*http.Request, error)
 
 type channelGroupConnector interface {
 	Connect(dopplerEndpoint doppler_endpoint.DopplerEndpoint, messagesChan chan<- []byte, stopChan <-chan struct{})
@@ -47,7 +44,6 @@ func NewDopplerProxy(
 	adminAuthorizer authorization.AdminAccessAuthorizer,
 	connector channelGroupConnector,
 	grpcConn grpcConnector,
-	translator RequestTranslator,
 	cookieDomain string,
 	logger *gosteno.Logger,
 ) *Proxy {
@@ -56,7 +52,6 @@ func NewDopplerProxy(
 		adminAuthorize: adminAuthorizer,
 		connector:      connector,
 		grpcConn:       grpcConn,
-		translate:      translator,
 		cookieDomain:   cookieDomain,
 		logger:         logger,
 	}
@@ -67,26 +62,18 @@ func (p *Proxy) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	p.logger.Debugf("doppler proxy: ServeHTTP entered with request %v", request.URL)
 	defer p.logger.Debugf("doppler proxy: ServeHTTP exited")
 
-	translatedRequest, err := p.translate(request)
-	if err != nil {
-		p.logger.Errorf("DopplerProxy.ServeHTTP: unable to translate request: %s", err.Error())
-		writer.WriteHeader(http.StatusNotFound)
-		fmt.Fprint(writer, "Resource Not Found.")
-		return
-	}
-
 	if request.Method == "HEAD" {
 		return
 	}
 
-	paths := strings.Split(translatedRequest.URL.Path, "/")
+	paths := strings.Split(request.URL.Path, "/")
 
 	endpointName := paths[1]
 	switch endpointName {
 	case "firehose":
-		p.serveFirehose(paths, writer, translatedRequest)
+		p.serveFirehose(paths, writer, request)
 	case "apps":
-		p.serveAppLogs(paths, writer, translatedRequest)
+		p.serveAppLogs(paths, writer, request)
 		if len(paths) > 3 {
 			endpoint := paths[3]
 			if endpoint != "" && (endpoint == "recentlogs" || endpoint == "containermetrics") {
@@ -94,7 +81,7 @@ func (p *Proxy) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			}
 		}
 	case "set-cookie":
-		p.serveSetCookie(writer, translatedRequest, p.cookieDomain)
+		p.serveSetCookie(writer, request, p.cookieDomain)
 	default:
 		writer.WriteHeader(http.StatusNotFound)
 		fmt.Fprint(writer, "Resource Not Found.")
