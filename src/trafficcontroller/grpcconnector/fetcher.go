@@ -1,12 +1,13 @@
 package grpcconnector
 
 import (
-	"context"
 	"doppler/dopplerservice"
 	"fmt"
 	"plumbing"
 	"strings"
 	"sync"
+
+	"golang.org/x/net/context"
 
 	"github.com/cloudfoundry/gosteno"
 

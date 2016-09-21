@@ -7,11 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc"
-
 	"github.com/cloudfoundry/loggregatorlib/loggertesthelper"
 	"github.com/cloudfoundry/loggregatorlib/server/handlers"
-	gorilla "github.com/gorilla/websocket"
+	"github.com/gorilla/websocket"
+	"google.golang.org/grpc"
 )
 
 type FakeDoppler struct {
@@ -19,12 +18,13 @@ type FakeDoppler struct {
 	GrpcEndpoint               string
 	connectionListener         net.Listener
 	grpcListener               net.Listener
-	websocket                  *gorilla.Conn
+	websocket                  *websocket.Conn
 	sendMessageChan            chan []byte
-	sendGrpcMessageChan        chan []byte
+	grpcOut                    chan []byte
 	TrafficControllerConnected chan *http.Request
-	GrpcStreamRequestChan      chan *plumbing.StreamRequest
-	GrpcFirehoseRequestChan    chan *plumbing.FirehoseRequest
+	StreamRequests             chan *plumbing.StreamRequest
+	StreamServers              chan plumbing.Doppler_StreamServer
+	FirehoseRequests           chan *plumbing.FirehoseRequest
 	connectionPresent          bool
 	done                       chan struct{}
 	sync.RWMutex
@@ -36,14 +36,17 @@ func New() *FakeDoppler {
 		GrpcEndpoint:               "127.0.0.1:1236",
 		TrafficControllerConnected: make(chan *http.Request, 1),
 		sendMessageChan:            make(chan []byte, 100),
-		sendGrpcMessageChan:        make(chan []byte, 100),
-		GrpcStreamRequestChan:      make(chan *plumbing.StreamRequest, 100),
-		GrpcFirehoseRequestChan:    make(chan *plumbing.FirehoseRequest, 100),
-		done: make(chan struct{}),
+		grpcOut:                    make(chan []byte, 100),
+		StreamRequests:             make(chan *plumbing.StreamRequest, 100),
+		StreamServers:              make(chan plumbing.Doppler_StreamServer, 100),
+		FirehoseRequests:           make(chan *plumbing.FirehoseRequest, 100),
+		done:                       make(chan struct{}),
 	}
 }
 
 func (fakeDoppler *FakeDoppler) Start() error {
+	defer close(fakeDoppler.done)
+
 	var err error
 	fakeDoppler.Lock()
 	fakeDoppler.grpcListener, err = net.Listen("tcp", fakeDoppler.GrpcEndpoint)
@@ -54,6 +57,7 @@ func (fakeDoppler *FakeDoppler) Start() error {
 
 	grpcServer := grpc.NewServer()
 	plumbing.RegisterDopplerServer(grpcServer, fakeDoppler)
+
 	go grpcServer.Serve(fakeDoppler.grpcListener)
 
 	fakeDoppler.Lock()
@@ -61,11 +65,11 @@ func (fakeDoppler *FakeDoppler) Start() error {
 	fakeDoppler.Unlock()
 	if err != nil {
 		return err
+
 	}
 	s := &http.Server{Addr: fakeDoppler.ApiEndpoint, Handler: fakeDoppler}
 
 	err = s.Serve(fakeDoppler.connectionListener)
-	close(fakeDoppler.done)
 	return err
 }
 
@@ -88,11 +92,11 @@ func (fakeDoppler *FakeDoppler) ServeHTTP(writer http.ResponseWriter, request *h
 
 func (fakeDoppler *FakeDoppler) Stop() {
 	fakeDoppler.Lock()
-	if fakeDoppler.connectionListener != nil {
-		fakeDoppler.connectionListener.Close()
-	}
 	if fakeDoppler.grpcListener != nil {
 		fakeDoppler.grpcListener.Close()
+	}
+	if fakeDoppler.connectionListener != nil {
+		fakeDoppler.connectionListener.Close()
 	}
 	fakeDoppler.Unlock()
 	<-fakeDoppler.done
@@ -106,21 +110,22 @@ func (fakeDoppler *FakeDoppler) ConnectionPresent() bool {
 }
 
 func (fakeDoppler *FakeDoppler) SendLogMessage(messageBody []byte) {
+	fakeDoppler.grpcOut <- messageBody
+}
+
+func (fakeDoppler *FakeDoppler) SendWSLogMessage(messageBody []byte) {
 	fakeDoppler.sendMessageChan <- messageBody
 }
 
-// TODO: Remove ViaGrpc suffix when WS endpoints on doppler are removed
-func (fakeDoppler *FakeDoppler) SendLogMessageViaGrpc(messageBody []byte) {
-	fakeDoppler.sendGrpcMessageChan <- messageBody
-}
-
 func (fakeDoppler *FakeDoppler) CloseLogMessageStream() {
+	close(fakeDoppler.grpcOut)
 	close(fakeDoppler.sendMessageChan)
 }
 
 func (fakeDoppler *FakeDoppler) Stream(request *plumbing.StreamRequest, server plumbing.Doppler_StreamServer) error {
-	fakeDoppler.GrpcStreamRequestChan <- request
-	for msg := range fakeDoppler.sendGrpcMessageChan {
+	fakeDoppler.StreamRequests <- request
+	fakeDoppler.StreamServers <- server
+	for msg := range fakeDoppler.grpcOut {
 		err := server.Send(&plumbing.Response{
 			Payload: msg,
 		})
@@ -132,8 +137,8 @@ func (fakeDoppler *FakeDoppler) Stream(request *plumbing.StreamRequest, server p
 }
 
 func (fakeDoppler *FakeDoppler) Firehose(request *plumbing.FirehoseRequest, server plumbing.Doppler_FirehoseServer) error {
-	fakeDoppler.GrpcFirehoseRequestChan <- request
-	for msg := range fakeDoppler.sendGrpcMessageChan {
+	fakeDoppler.FirehoseRequests <- request
+	for msg := range fakeDoppler.grpcOut {
 		err := server.Send(&plumbing.Response{
 			Payload: msg,
 		})

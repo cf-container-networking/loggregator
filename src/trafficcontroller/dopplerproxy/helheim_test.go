@@ -7,12 +7,67 @@ package dopplerproxy_test
 
 import (
 	"plumbing"
+	"time"
 	"trafficcontroller/doppler_endpoint"
+	"trafficcontroller/grpcconnector"
 
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 )
+
+type mockGrpcConnector struct {
+	StreamCalled chan bool
+	StreamInput  struct {
+		Ctx  chan context.Context
+		In   chan *plumbing.StreamRequest
+		Opts chan []grpc.CallOption
+	}
+	StreamOutput struct {
+		Ret0 chan grpcconnector.Receiver
+		Ret1 chan error
+	}
+	FirehoseCalled chan bool
+	FirehoseInput  struct {
+		Ctx  chan context.Context
+		In   chan *plumbing.FirehoseRequest
+		Opts chan []grpc.CallOption
+	}
+	FirehoseOutput struct {
+		Ret0 chan grpcconnector.Receiver
+		Ret1 chan error
+	}
+}
+
+func newMockGrpcConnector() *mockGrpcConnector {
+	m := &mockGrpcConnector{}
+	m.StreamCalled = make(chan bool, 100)
+	m.StreamInput.Ctx = make(chan context.Context, 100)
+	m.StreamInput.In = make(chan *plumbing.StreamRequest, 100)
+	m.StreamInput.Opts = make(chan []grpc.CallOption, 100)
+	m.StreamOutput.Ret0 = make(chan grpcconnector.Receiver, 100)
+	m.StreamOutput.Ret1 = make(chan error, 100)
+	m.FirehoseCalled = make(chan bool, 100)
+	m.FirehoseInput.Ctx = make(chan context.Context, 100)
+	m.FirehoseInput.In = make(chan *plumbing.FirehoseRequest, 100)
+	m.FirehoseInput.Opts = make(chan []grpc.CallOption, 100)
+	m.FirehoseOutput.Ret0 = make(chan grpcconnector.Receiver, 100)
+	m.FirehoseOutput.Ret1 = make(chan error, 100)
+	return m
+}
+func (m *mockGrpcConnector) Stream(ctx context.Context, in *plumbing.StreamRequest, opts ...grpc.CallOption) (grpcconnector.Receiver, error) {
+	m.StreamCalled <- true
+	m.StreamInput.Ctx <- ctx
+	m.StreamInput.In <- in
+	m.StreamInput.Opts <- opts
+	return <-m.StreamOutput.Ret0, <-m.StreamOutput.Ret1
+}
+func (m *mockGrpcConnector) Firehose(ctx context.Context, in *plumbing.FirehoseRequest, opts ...grpc.CallOption) (grpcconnector.Receiver, error) {
+	m.FirehoseCalled <- true
+	m.FirehoseInput.Ctx <- ctx
+	m.FirehoseInput.In <- in
+	m.FirehoseInput.Opts <- opts
+	return <-m.FirehoseOutput.Ret0, <-m.FirehoseOutput.Ret1
+}
 
 type mockChannelGroupConnector struct {
 	ConnectCalled chan bool
@@ -38,240 +93,77 @@ func (m *mockChannelGroupConnector) Connect(dopplerEndpoint doppler_endpoint.Dop
 	m.ConnectInput.StopChan <- stopChan
 }
 
-type mockGrpcConnector struct {
-	StreamCalled chan bool
-	StreamInput  struct {
-		Ctx  chan context.Context
-		In   chan *plumbing.StreamRequest
-		Opts chan []grpc.CallOption
+type mockContext struct {
+	DeadlineCalled chan bool
+	DeadlineOutput struct {
+		Deadline chan time.Time
+		Ok       chan bool
 	}
-	StreamOutput struct {
-		Ret0 chan plumbing.Doppler_StreamClient
-		Ret1 chan error
+	DoneCalled chan bool
+	DoneOutput struct {
+		Ret0 chan (<-chan struct{})
 	}
-	FirehoseCalled chan bool
-	FirehoseInput  struct {
-		Ctx  chan context.Context
-		In   chan *plumbing.FirehoseRequest
-		Opts chan []grpc.CallOption
+	ErrCalled chan bool
+	ErrOutput struct {
+		Ret0 chan error
 	}
-	FirehoseOutput struct {
-		Ret0 chan plumbing.Doppler_FirehoseClient
-		Ret1 chan error
+	ValueCalled chan bool
+	ValueInput  struct {
+		Key chan interface{}
+	}
+	ValueOutput struct {
+		Ret0 chan interface{}
 	}
 }
 
-func newMockGrpcConnector() *mockGrpcConnector {
-	m := &mockGrpcConnector{}
-	m.StreamCalled = make(chan bool, 100)
-	m.StreamInput.Ctx = make(chan context.Context, 100)
-	m.StreamInput.In = make(chan *plumbing.StreamRequest, 100)
-	m.StreamInput.Opts = make(chan []grpc.CallOption, 100)
-	m.StreamOutput.Ret0 = make(chan plumbing.Doppler_StreamClient, 100)
-	m.StreamOutput.Ret1 = make(chan error, 100)
-	m.FirehoseCalled = make(chan bool, 100)
-	m.FirehoseInput.Ctx = make(chan context.Context, 100)
-	m.FirehoseInput.In = make(chan *plumbing.FirehoseRequest, 100)
-	m.FirehoseInput.Opts = make(chan []grpc.CallOption, 100)
-	m.FirehoseOutput.Ret0 = make(chan plumbing.Doppler_FirehoseClient, 100)
-	m.FirehoseOutput.Ret1 = make(chan error, 100)
+func newMockContext() *mockContext {
+	m := &mockContext{}
+	m.DeadlineCalled = make(chan bool, 100)
+	m.DeadlineOutput.Deadline = make(chan time.Time, 100)
+	m.DeadlineOutput.Ok = make(chan bool, 100)
+	m.DoneCalled = make(chan bool, 100)
+	m.DoneOutput.Ret0 = make(chan (<-chan struct{}), 100)
+	m.ErrCalled = make(chan bool, 100)
+	m.ErrOutput.Ret0 = make(chan error, 100)
+	m.ValueCalled = make(chan bool, 100)
+	m.ValueInput.Key = make(chan interface{}, 100)
+	m.ValueOutput.Ret0 = make(chan interface{}, 100)
 	return m
 }
-func (m *mockGrpcConnector) Stream(ctx context.Context, in *plumbing.StreamRequest, opts ...grpc.CallOption) (plumbing.Doppler_StreamClient, error) {
-	m.StreamCalled <- true
-	m.StreamInput.Ctx <- ctx
-	m.StreamInput.In <- in
-	m.StreamInput.Opts <- opts
-	return <-m.StreamOutput.Ret0, <-m.StreamOutput.Ret1
+func (m *mockContext) Deadline() (deadline time.Time, ok bool) {
+	m.DeadlineCalled <- true
+	return <-m.DeadlineOutput.Deadline, <-m.DeadlineOutput.Ok
 }
-func (m *mockGrpcConnector) Firehose(ctx context.Context, in *plumbing.FirehoseRequest, opts ...grpc.CallOption) (plumbing.Doppler_FirehoseClient, error) {
-	m.FirehoseCalled <- true
-	m.FirehoseInput.Ctx <- ctx
-	m.FirehoseInput.In <- in
-	m.FirehoseInput.Opts <- opts
-	return <-m.FirehoseOutput.Ret0, <-m.FirehoseOutput.Ret1
+func (m *mockContext) Done() <-chan struct{} {
+	m.DoneCalled <- true
+	return <-m.DoneOutput.Ret0
+}
+func (m *mockContext) Err() error {
+	m.ErrCalled <- true
+	return <-m.ErrOutput.Ret0
+}
+func (m *mockContext) Value(key interface{}) interface{} {
+	m.ValueCalled <- true
+	m.ValueInput.Key <- key
+	return <-m.ValueOutput.Ret0
 }
 
-type mockDoppler_StreamClient struct {
+type mockReceiver struct {
 	RecvCalled chan bool
 	RecvOutput struct {
 		Ret0 chan *plumbing.Response
 		Ret1 chan error
 	}
-	HeaderCalled chan bool
-	HeaderOutput struct {
-		Ret0 chan metadata.MD
-		Ret1 chan error
-	}
-	TrailerCalled chan bool
-	TrailerOutput struct {
-		Ret0 chan metadata.MD
-	}
-	CloseSendCalled chan bool
-	CloseSendOutput struct {
-		Ret0 chan error
-	}
-	ContextCalled chan bool
-	ContextOutput struct {
-		Ret0 chan context.Context
-	}
-	SendMsgCalled chan bool
-	SendMsgInput  struct {
-		M chan interface{}
-	}
-	SendMsgOutput struct {
-		Ret0 chan error
-	}
-	RecvMsgCalled chan bool
-	RecvMsgInput  struct {
-		M chan interface{}
-	}
-	RecvMsgOutput struct {
-		Ret0 chan error
-	}
 }
 
-func newMockDoppler_StreamClient() *mockDoppler_StreamClient {
-	m := &mockDoppler_StreamClient{}
+func newMockReceiver() *mockReceiver {
+	m := &mockReceiver{}
 	m.RecvCalled = make(chan bool, 100)
 	m.RecvOutput.Ret0 = make(chan *plumbing.Response, 100)
 	m.RecvOutput.Ret1 = make(chan error, 100)
-	m.HeaderCalled = make(chan bool, 100)
-	m.HeaderOutput.Ret0 = make(chan metadata.MD, 100)
-	m.HeaderOutput.Ret1 = make(chan error, 100)
-	m.TrailerCalled = make(chan bool, 100)
-	m.TrailerOutput.Ret0 = make(chan metadata.MD, 100)
-	m.CloseSendCalled = make(chan bool, 100)
-	m.CloseSendOutput.Ret0 = make(chan error, 100)
-	m.ContextCalled = make(chan bool, 100)
-	m.ContextOutput.Ret0 = make(chan context.Context, 100)
-	m.SendMsgCalled = make(chan bool, 100)
-	m.SendMsgInput.M = make(chan interface{}, 100)
-	m.SendMsgOutput.Ret0 = make(chan error, 100)
-	m.RecvMsgCalled = make(chan bool, 100)
-	m.RecvMsgInput.M = make(chan interface{}, 100)
-	m.RecvMsgOutput.Ret0 = make(chan error, 100)
 	return m
 }
-func (m *mockDoppler_StreamClient) Recv() (*plumbing.Response, error) {
+func (m *mockReceiver) Recv() (*plumbing.Response, error) {
 	m.RecvCalled <- true
 	return <-m.RecvOutput.Ret0, <-m.RecvOutput.Ret1
-}
-func (m *mockDoppler_StreamClient) Header() (metadata.MD, error) {
-	m.HeaderCalled <- true
-	return <-m.HeaderOutput.Ret0, <-m.HeaderOutput.Ret1
-}
-func (m *mockDoppler_StreamClient) Trailer() metadata.MD {
-	m.TrailerCalled <- true
-	return <-m.TrailerOutput.Ret0
-}
-func (m *mockDoppler_StreamClient) CloseSend() error {
-	m.CloseSendCalled <- true
-	return <-m.CloseSendOutput.Ret0
-}
-func (m *mockDoppler_StreamClient) Context() context.Context {
-	m.ContextCalled <- true
-	return <-m.ContextOutput.Ret0
-}
-func (m *mockDoppler_StreamClient) SendMsg(msg interface{}) error {
-	m.SendMsgCalled <- true
-	m.SendMsgInput.M <- msg
-	return <-m.SendMsgOutput.Ret0
-}
-func (m *mockDoppler_StreamClient) RecvMsg(msg interface{}) error {
-	m.RecvMsgCalled <- true
-	m.RecvMsgInput.M <- msg
-	return <-m.RecvMsgOutput.Ret0
-}
-
-type mockDoppler_FirehoseClient struct {
-	RecvCalled chan bool
-	RecvOutput struct {
-		Ret0 chan *plumbing.Response
-		Ret1 chan error
-	}
-	HeaderCalled chan bool
-	HeaderOutput struct {
-		Ret0 chan metadata.MD
-		Ret1 chan error
-	}
-	TrailerCalled chan bool
-	TrailerOutput struct {
-		Ret0 chan metadata.MD
-	}
-	CloseSendCalled chan bool
-	CloseSendOutput struct {
-		Ret0 chan error
-	}
-	ContextCalled chan bool
-	ContextOutput struct {
-		Ret0 chan context.Context
-	}
-	SendMsgCalled chan bool
-	SendMsgInput  struct {
-		M chan interface{}
-	}
-	SendMsgOutput struct {
-		Ret0 chan error
-	}
-	RecvMsgCalled chan bool
-	RecvMsgInput  struct {
-		M chan interface{}
-	}
-	RecvMsgOutput struct {
-		Ret0 chan error
-	}
-}
-
-func newMockDoppler_FirehoseClient() *mockDoppler_FirehoseClient {
-	m := &mockDoppler_FirehoseClient{}
-	m.RecvCalled = make(chan bool, 100)
-	m.RecvOutput.Ret0 = make(chan *plumbing.Response, 100)
-	m.RecvOutput.Ret1 = make(chan error, 100)
-	m.HeaderCalled = make(chan bool, 100)
-	m.HeaderOutput.Ret0 = make(chan metadata.MD, 100)
-	m.HeaderOutput.Ret1 = make(chan error, 100)
-	m.TrailerCalled = make(chan bool, 100)
-	m.TrailerOutput.Ret0 = make(chan metadata.MD, 100)
-	m.CloseSendCalled = make(chan bool, 100)
-	m.CloseSendOutput.Ret0 = make(chan error, 100)
-	m.ContextCalled = make(chan bool, 100)
-	m.ContextOutput.Ret0 = make(chan context.Context, 100)
-	m.SendMsgCalled = make(chan bool, 100)
-	m.SendMsgInput.M = make(chan interface{}, 100)
-	m.SendMsgOutput.Ret0 = make(chan error, 100)
-	m.RecvMsgCalled = make(chan bool, 100)
-	m.RecvMsgInput.M = make(chan interface{}, 100)
-	m.RecvMsgOutput.Ret0 = make(chan error, 100)
-	return m
-}
-func (m *mockDoppler_FirehoseClient) Recv() (*plumbing.Response, error) {
-	m.RecvCalled <- true
-	return <-m.RecvOutput.Ret0, <-m.RecvOutput.Ret1
-}
-func (m *mockDoppler_FirehoseClient) Header() (metadata.MD, error) {
-	m.HeaderCalled <- true
-	return <-m.HeaderOutput.Ret0, <-m.HeaderOutput.Ret1
-}
-func (m *mockDoppler_FirehoseClient) Trailer() metadata.MD {
-	m.TrailerCalled <- true
-	return <-m.TrailerOutput.Ret0
-}
-func (m *mockDoppler_FirehoseClient) CloseSend() error {
-	m.CloseSendCalled <- true
-	return <-m.CloseSendOutput.Ret0
-}
-func (m *mockDoppler_FirehoseClient) Context() context.Context {
-	m.ContextCalled <- true
-	return <-m.ContextOutput.Ret0
-}
-func (m *mockDoppler_FirehoseClient) SendMsg(msg interface{}) error {
-	m.SendMsgCalled <- true
-	m.SendMsgInput.M <- msg
-	return <-m.SendMsgOutput.Ret0
-}
-func (m *mockDoppler_FirehoseClient) RecvMsg(msg interface{}) error {
-	m.RecvMsgCalled <- true
-	m.RecvMsgInput.M <- msg
-	return <-m.RecvMsgOutput.Ret0
 }

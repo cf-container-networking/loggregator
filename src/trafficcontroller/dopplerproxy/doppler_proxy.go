@@ -8,6 +8,7 @@ import (
 	"strings"
 	"trafficcontroller/authorization"
 	"trafficcontroller/doppler_endpoint"
+	"trafficcontroller/grpcconnector"
 
 	"google.golang.org/grpc"
 
@@ -35,8 +36,8 @@ type channelGroupConnector interface {
 
 // TODO: we need to implement a concrete type that muxs to all the dopplers
 type grpcConnector interface {
-	Stream(ctx context.Context, in *plumbing.StreamRequest, opts ...grpc.CallOption) (plumbing.Doppler_StreamClient, error)
-	Firehose(ctx context.Context, in *plumbing.FirehoseRequest, opts ...grpc.CallOption) (plumbing.Doppler_FirehoseClient, error)
+	Stream(ctx context.Context, in *plumbing.StreamRequest, opts ...grpc.CallOption) (grpcconnector.Receiver, error)
+	Firehose(ctx context.Context, in *plumbing.FirehoseRequest, opts ...grpc.CallOption) (grpcconnector.Receiver, error)
 }
 
 func NewDopplerProxy(
@@ -190,6 +191,7 @@ func (p *Proxy) serveAppLogs(paths []string, writer http.ResponseWriter, request
 	})
 
 	if err != nil {
+		p.logger.Errorf("Failed to stream from doppler: %s", err)
 		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}

@@ -31,7 +31,7 @@ var _ = Describe("TrafficController for dropsonde messages", func() {
 		fakeDoppler.Stop()
 	})
 
-	FContext("Streaming", func() {
+	Context("Streaming", func() {
 		var (
 			client   *consumer.Consumer
 			messages <-chan *events.Envelope
@@ -44,55 +44,9 @@ var _ = Describe("TrafficController for dropsonde messages", func() {
 		})
 
 		It("passes messages through", func() {
-			time.Sleep(10 * time.Second)
-			var request *http.Request
-			Eventually(fakeDoppler.TrafficControllerConnected, 10).Should(Receive(&request))
-			Expect(request.URL.Path).To(Equal("/apps/1234/stream"))
-
-			currentTime := time.Now().UnixNano()
-			dropsondeMessage := makeDropsondeMessage("Hello through NOAA", APP_ID, currentTime)
-			fakeDoppler.SendLogMessageViaGrpc(dropsondeMessage)
-
 			var grpcRequest *plumbing.StreamRequest
-			Eventually(fakeDoppler.GrpcStreamRequestChan).Should(Receive(&grpcRequest))
+			Eventually(fakeDoppler.StreamRequests, 10).Should(Receive(&grpcRequest))
 			Expect(grpcRequest.AppID).To(Equal(APP_ID))
-
-			var receivedEnvelope *events.Envelope
-			Eventually(messages).Should(Receive(&receivedEnvelope))
-			Consistently(errors).ShouldNot(Receive())
-
-			receivedMessage := receivedEnvelope.GetLogMessage()
-			Expect(receivedMessage.GetMessage()).To(BeEquivalentTo("Hello through NOAA"))
-			Expect(receivedMessage.GetAppId()).To(Equal(APP_ID))
-			Expect(receivedMessage.GetTimestamp()).To(Equal(currentTime))
-
-			client.Close()
-		})
-
-		It("closes the upstream websocket connection when done", func() {
-			var request *http.Request
-			Eventually(fakeDoppler.TrafficControllerConnected, 10).Should(Receive(&request))
-			Eventually(fakeDoppler.ConnectionPresent).Should(BeTrue())
-
-			client.Close()
-
-			Eventually(fakeDoppler.ConnectionPresent).Should(BeFalse())
-		})
-	})
-
-	Context("Firehose", func() {
-		var (
-			messages <-chan *events.Envelope
-			errors   <-chan error
-		)
-
-		It("passes messages through for every app for uaa admins", func() {
-			client := consumer.New(dropsondeEndpoint, &tls.Config{}, nil)
-			messages, errors = client.FirehoseWithoutReconnect(SUBSCRIPTION_ID, AUTH_TOKEN)
-
-			var request *http.Request
-			Eventually(fakeDoppler.TrafficControllerConnected, 10).Should(Receive(&request))
-			Expect(request.URL.Path).To(Equal("/firehose/" + SUBSCRIPTION_ID))
 
 			currentTime := time.Now().UnixNano()
 			dropsondeMessage := makeDropsondeMessage("Hello through NOAA", APP_ID, currentTime)
@@ -108,6 +62,46 @@ var _ = Describe("TrafficController for dropsonde messages", func() {
 			Expect(receivedMessage.GetTimestamp()).To(Equal(currentTime))
 
 			client.Close()
+		})
+
+		It("closes the upstream websocket connection when done", func() {
+			var server plumbing.Doppler_StreamServer
+			Eventually(fakeDoppler.StreamServers, 10).Should(Receive(&server))
+
+			client.Close()
+
+			Eventually(server.Context().Done()).Should(BeClosed())
+		})
+	})
+
+	Context("Firehose", func() {
+		var (
+			messages <-chan *events.Envelope
+			errors   <-chan error
+		)
+
+		It("passes messages through for every app for uaa admins", func() {
+			client := consumer.New(dropsondeEndpoint, &tls.Config{}, nil)
+			defer client.Close()
+			messages, errors = client.FirehoseWithoutReconnect(SUBSCRIPTION_ID, AUTH_TOKEN)
+
+			var grpcRequest *plumbing.FirehoseRequest
+			Eventually(fakeDoppler.FirehoseRequests, 10).Should(Receive(&grpcRequest))
+			Expect(grpcRequest.SubID).To(Equal(SUBSCRIPTION_ID))
+
+			currentTime := time.Now().UnixNano()
+			dropsondeMessage := makeDropsondeMessage("Hello through NOAA", APP_ID, currentTime)
+			fakeDoppler.SendLogMessage(dropsondeMessage)
+
+			var receivedEnvelope *events.Envelope
+			Eventually(messages).Should(Receive(&receivedEnvelope))
+			Consistently(errors).ShouldNot(Receive())
+
+			Expect(receivedEnvelope.GetEventType()).To(Equal(events.Envelope_LogMessage))
+			receivedMessage := receivedEnvelope.GetLogMessage()
+			Expect(receivedMessage.GetMessage()).To(BeEquivalentTo("Hello through NOAA"))
+			Expect(receivedMessage.GetAppId()).To(Equal(APP_ID))
+			Expect(receivedMessage.GetTimestamp()).To(Equal(currentTime))
 		})
 	})
 

@@ -37,8 +37,8 @@ var _ = Describe("ServeHTTP()", func() {
 		channelGroupConnector *fakeChannelGroupConnector
 
 		mockGrpcConnector         *mockGrpcConnector
-		mockDopplerStreamClient   *mockDoppler_StreamClient
-		mockDopplerFirehoseClient *mockDoppler_FirehoseClient
+		mockDopplerStreamClient   *mockReceiver
+		mockDopplerFirehoseClient *mockReceiver
 	)
 
 	BeforeEach(func() {
@@ -46,8 +46,8 @@ var _ = Describe("ServeHTTP()", func() {
 		adminAuth = AdminAuthorizer{Result: AuthorizerResult{Status: http.StatusOK}}
 		mockGrpcConnector = newMockGrpcConnector()
 
-		mockDopplerStreamClient = newMockDoppler_StreamClient()
-		mockDopplerFirehoseClient = newMockDoppler_FirehoseClient()
+		mockDopplerStreamClient = newMockReceiver()
+		mockDopplerFirehoseClient = newMockReceiver()
 
 		mockGrpcConnector.StreamOutput.Ret0 <- mockDopplerStreamClient
 		mockGrpcConnector.FirehoseOutput.Ret0 <- mockDopplerFirehoseClient
