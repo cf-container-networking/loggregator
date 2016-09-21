@@ -26,15 +26,15 @@ import (
 	"logger"
 	"metron/eventwriter"
 
+	"code.cloudfoundry.org/localip"
+	"code.cloudfoundry.org/workpool"
 	"github.com/cloudfoundry/dropsonde/metric_sender"
 	"github.com/cloudfoundry/dropsonde/metricbatcher"
 	"github.com/cloudfoundry/dropsonde/metrics"
 	"github.com/cloudfoundry/dropsonde/runtime_stats"
 	"github.com/cloudfoundry/gosteno"
-	"github.com/cloudfoundry/gunk/workpool"
 	"github.com/cloudfoundry/storeadapter"
 	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
-	"github.com/pivotal-golang/localip"
 
 	"metron/config"
 	"signalmanager"

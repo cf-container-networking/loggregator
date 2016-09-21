@@ -5,6 +5,8 @@ dependencies:
 files:
 - loggregator/src/doppler/LICENSE
 - loggregator/src/doppler/NOTICE
+- loggregator/src/code.cloudfoundry.org/localip/*.go # gosub
+- loggregator/src/code.cloudfoundry.org/workpool/*.go # gosub
 - loggregator/src/doppler/*.go # gosub
 - loggregator/src/doppler/config/*.go # gosub
 - loggregator/src/doppler/dopplerservice/*.go # gosub
@@ -45,7 +47,6 @@ files:
 - loggregator/src/github.com/cloudfoundry/dropsonde/signature/*.go # gosub
 - loggregator/src/github.com/cloudfoundry/gosteno/*.go # gosub
 - loggregator/src/github.com/cloudfoundry/gosteno/syslog/*.go # gosub
-- loggregator/src/github.com/cloudfoundry/gunk/workpool/*.go # gosub
 - loggregator/src/github.com/cloudfoundry/loggregatorlib/appservice/*.go # gosub
 - loggregator/src/github.com/cloudfoundry/loggregatorlib/server/*.go # gosub
 - loggregator/src/github.com/cloudfoundry/loggregatorlib/store/*.go # gosub
@@ -60,7 +61,6 @@ files:
 - loggregator/src/github.com/golang/protobuf/proto/*.go # gosub
 - loggregator/src/github.com/gorilla/websocket/*.go # gosub
 - loggregator/src/github.com/nu7hatch/gouuid/*.go # gosub
-- loggregator/src/github.com/pivotal-golang/localip/*.go # gosub
 - loggregator/src/github.com/ugorji/go/codec/*.go # gosub
 - loggregator/src/golang.org/x/net/context/*.go # gosub
 - loggregator/src/golang.org/x/net/http2/*.go # gosub
