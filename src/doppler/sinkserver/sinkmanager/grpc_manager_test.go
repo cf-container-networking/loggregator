@@ -2,7 +2,9 @@ package sinkmanager_test
 
 import (
 	"doppler/sinkserver/sinkmanager"
+	"errors"
 	"plumbing"
+	"runtime"
 	"time"
 
 	. "github.com/apoydence/eachers"
@@ -15,9 +17,7 @@ import (
 )
 
 var _ = Describe("SinkManager GRPC", func() {
-	var (
-		m *sinkmanager.SinkManager
-	)
+	var m *sinkmanager.SinkManager
 
 	BeforeEach(func() {
 		m = sinkmanager.New(
@@ -32,7 +32,6 @@ var _ = Describe("SinkManager GRPC", func() {
 			time.Second,
 			time.Second,
 		)
-
 		fakeEventEmitter.Reset()
 	})
 
@@ -42,11 +41,13 @@ var _ = Describe("SinkManager GRPC", func() {
 
 			firstSender := newMockGRPCSender()
 			close(firstSender.SendOutput.Err)
-			m.RegisterStream(&req, firstSender)
+			stop1 := make(chan struct{})
+			m.RegisterStream(&req, firstSender, stop1)
 
 			secondSender := newMockGRPCSender()
 			close(secondSender.SendOutput.Err)
-			m.RegisterStream(&req, secondSender)
+			stop2 := make(chan struct{})
+			m.RegisterStream(&req, secondSender, stop2)
 
 			env := &events.Envelope{
 				EventType: events.Envelope_LogMessage.Enum(),
@@ -57,7 +58,6 @@ var _ = Describe("SinkManager GRPC", func() {
 					Timestamp:   proto.Int64(time.Now().UnixNano()),
 				},
 			}
-			m.SendTo("app", env)
 
 			payload, err := proto.Marshal(env)
 			Expect(err).ToNot(HaveOccurred())
@@ -66,6 +66,7 @@ var _ = Describe("SinkManager GRPC", func() {
 				Payload: payload,
 			}
 
+			m.SendTo("app", env)
 			Eventually(firstSender.SendInput.Resp).Should(BeCalled(
 				With(expected),
 			))
@@ -79,7 +80,8 @@ var _ = Describe("SinkManager GRPC", func() {
 
 			sender := newMockGRPCSender()
 			close(sender.SendOutput.Err)
-			m.RegisterStream(&req, sender)
+			stop := make(chan struct{})
+			m.RegisterStream(&req, sender, stop)
 
 			env := &events.Envelope{
 				EventType: events.Envelope_LogMessage.Enum(),
@@ -100,9 +102,11 @@ var _ = Describe("SinkManager GRPC", func() {
 			sender := newMockGRPCSender()
 			close(sender.SendOutput.Err)
 
-			go m.RegisterStream(&req, sender)
+			stop1 := make(chan struct{})
+			go m.RegisterStream(&req, sender, stop1)
 
-			m.RegisterStream(&req, sender)
+			stop2 := make(chan struct{})
+			m.RegisterStream(&req, sender, stop2)
 		})
 
 		It("continues to send while a sender is blocking", func(done Done) {
@@ -111,11 +115,13 @@ var _ = Describe("SinkManager GRPC", func() {
 			req := plumbing.StreamRequest{AppID: "app"}
 
 			blockingSender := newMockGRPCSender()
-			m.RegisterStream(&req, blockingSender)
+			stop1 := make(chan struct{})
+			m.RegisterStream(&req, blockingSender, stop1)
 
 			workingSender := newMockGRPCSender()
 			close(workingSender.SendOutput.Err)
-			m.RegisterStream(&req, workingSender)
+			stop2 := make(chan struct{})
+			m.RegisterStream(&req, workingSender, stop2)
 
 			env := &events.Envelope{
 				EventType: events.Envelope_LogMessage.Enum(),
@@ -139,6 +145,77 @@ var _ = Describe("SinkManager GRPC", func() {
 				With(expected),
 			))
 		})
+
+		It("unregisters the connection", func() {
+			req := plumbing.StreamRequest{AppID: "app"}
+
+			firstSender := newMockGRPCSender()
+			firstSender.SendOutput.Err <- nil
+			stop1 := make(chan struct{})
+			m.RegisterStream(&req, firstSender, stop1)
+
+			secondSender := newMockGRPCSender()
+			close(secondSender.SendOutput.Err)
+			stop2 := make(chan struct{})
+			m.RegisterStream(&req, secondSender, stop2)
+
+			env := &events.Envelope{
+				EventType: events.Envelope_LogMessage.Enum(),
+				Origin:    proto.String("origin"),
+				LogMessage: &events.LogMessage{
+					Message:     []byte("I am a MESSAGE!"),
+					MessageType: events.LogMessage_OUT.Enum(),
+					Timestamp:   proto.Int64(time.Now().UnixNano()),
+				},
+			}
+
+			payload, err := proto.Marshal(env)
+			Expect(err).ToNot(HaveOccurred())
+
+			expected := &plumbing.Response{
+				Payload: payload,
+			}
+
+			m.SendTo("app", env)
+			Eventually(firstSender.SendInput).Should(BeCalled(
+				With(expected),
+			))
+			Eventually(secondSender.SendInput).Should(BeCalled(
+				With(expected),
+			))
+
+			routines := runtime.NumGoroutine()
+
+			m.UnregisterStream(&req, firstSender)
+			m.SendTo("app", env)
+			Consistently(firstSender.SendInput).ShouldNot(BeCalled())
+			Eventually(secondSender.SendInput).Should(BeCalled(With(expected)))
+
+			By("asserting that the connection's goroutine(s) is/are closed")
+			Eventually(runtime.NumGoroutine).Should(BeNumerically("<", routines))
+		})
+
+		It("closes the stop channel when send returns an error", func() {
+			req := plumbing.StreamRequest{AppID: "app"}
+
+			sender := newMockGRPCSender()
+			stop := make(chan struct{})
+			m.RegisterStream(&req, sender, stop)
+
+			env := &events.Envelope{
+				EventType: events.Envelope_LogMessage.Enum(),
+				Origin:    proto.String("origin"),
+				LogMessage: &events.LogMessage{
+					Message:     []byte("I am a MESSAGE!"),
+					MessageType: events.LogMessage_OUT.Enum(),
+					Timestamp:   proto.Int64(time.Now().UnixNano()),
+				},
+			}
+			m.SendTo("app", env)
+			sender.SendOutput.Err <- errors.New("boom")
+
+			Eventually(stop).Should(BeClosed())
+		})
 	})
 
 	Describe("Firehose", func() {
@@ -148,12 +225,14 @@ var _ = Describe("SinkManager GRPC", func() {
 			firstReq := plumbing.FirehoseRequest{SubID: "first-subscription"}
 			firstSender := newMockGRPCSender()
 			close(firstSender.SendOutput.Err)
-			m.RegisterFirehose(&firstReq, firstSender)
+			stop1 := make(chan struct{})
+			m.RegisterFirehose(&firstReq, firstSender, stop1)
 
 			secondReq := plumbing.FirehoseRequest{SubID: "second-subscription"}
 			secondSender := newMockGRPCSender()
 			close(secondSender.SendOutput.Err)
-			m.RegisterFirehose(&secondReq, secondSender)
+			stop2 := make(chan struct{})
+			m.RegisterFirehose(&secondReq, secondSender, stop2)
 
 			env := &events.Envelope{
 				EventType: events.Envelope_ContainerMetric.Enum(),
@@ -187,11 +266,13 @@ var _ = Describe("SinkManager GRPC", func() {
 
 			firstSender := newMockGRPCSender()
 			close(firstSender.SendOutput.Err)
-			m.RegisterFirehose(&req, firstSender)
+			stop1 := make(chan struct{})
+			m.RegisterFirehose(&req, firstSender, stop1)
 
 			secondSender := newMockGRPCSender()
 			close(secondSender.SendOutput.Err)
-			m.RegisterFirehose(&req, secondSender)
+			stop2 := make(chan struct{})
+			m.RegisterFirehose(&req, secondSender, stop2)
 
 			env := &events.Envelope{
 				EventType: events.Envelope_ContainerMetric.Enum(),
@@ -229,8 +310,11 @@ var _ = Describe("SinkManager GRPC", func() {
 			sender := newMockGRPCSender()
 			close(sender.SendOutput.Err)
 
-			go m.RegisterFirehose(&req, sender)
-			m.RegisterFirehose(&req, sender)
+			stop1 := make(chan struct{})
+			go m.RegisterFirehose(&req, sender, stop1)
+
+			stop2 := make(chan struct{})
+			m.RegisterFirehose(&req, sender, stop2)
 		})
 
 		It("continues to send while a sender is blocking", func(done Done) {
@@ -240,11 +324,13 @@ var _ = Describe("SinkManager GRPC", func() {
 			req2 := plumbing.FirehoseRequest{SubID: "sub-2"}
 
 			blockingSender := newMockGRPCSender()
-			m.RegisterFirehose(&req1, blockingSender)
+			stop1 := make(chan struct{})
+			m.RegisterFirehose(&req1, blockingSender, stop1)
 
 			workingSender := newMockGRPCSender()
 			close(workingSender.SendOutput.Err)
-			m.RegisterFirehose(&req2, workingSender)
+			stop2 := make(chan struct{})
+			m.RegisterFirehose(&req2, workingSender, stop2)
 
 			env := &events.Envelope{
 				EventType: events.Envelope_LogMessage.Enum(),
@@ -272,7 +358,8 @@ var _ = Describe("SinkManager GRPC", func() {
 		It("reports the number of dropped messages", func() {
 			req := plumbing.FirehoseRequest{SubID: "sub-1"}
 			blockingSender := newMockGRPCSender()
-			m.RegisterFirehose(&req, blockingSender)
+			stop := make(chan struct{})
+			m.RegisterFirehose(&req, blockingSender, stop)
 
 			env := &events.Envelope{
 				EventType: events.Envelope_LogMessage.Enum(),
@@ -299,6 +386,71 @@ var _ = Describe("SinkManager GRPC", func() {
 			Eventually(mockBatcher.BatchAddCounterInput).Should(BeCalled(
 				With("Diode.totalDroppedMessages", uint64(1000)),
 			))
+		})
+
+		It("unregisters", func() {
+			req := plumbing.FirehoseRequest{SubID: "first-subscription"}
+			sender := newMockGRPCSender()
+			close(sender.SendOutput.Err)
+
+			env := &events.Envelope{
+				EventType: events.Envelope_ContainerMetric.Enum(),
+				Origin:    proto.String("origin"),
+				ContainerMetric: &events.ContainerMetric{
+					ApplicationId: proto.String("app"),
+					InstanceIndex: proto.Int32(1),
+					CpuPercentage: proto.Float64(12.3),
+					MemoryBytes:   proto.Uint64(1),
+					DiskBytes:     proto.Uint64(1),
+				},
+			}
+			payload, err := proto.Marshal(env)
+			Expect(err).ToNot(HaveOccurred())
+			expected := &plumbing.Response{
+				Payload: payload,
+			}
+
+			stop := make(chan struct{})
+			m.RegisterFirehose(&req, sender, stop)
+			m.SendTo("app", env)
+			Eventually(sender.SendInput.Resp).Should(BeCalled(
+				With(expected),
+			))
+
+			routines := runtime.NumGoroutine()
+
+			m.UnregisterFirehose(&req)
+			m.SendTo("app", env)
+			Consistently(sender.SendInput.Resp).ShouldNot(BeCalled(
+				With(expected),
+			))
+
+			By("asserting that the connection's goroutine(s) is/are closed")
+			Eventually(runtime.NumGoroutine).Should(BeNumerically("<", routines))
+		})
+
+		It("closes the stop channel when send returns an error", func() {
+			req := plumbing.FirehoseRequest{SubID: "first-subscription"}
+			sender := newMockGRPCSender()
+			sender.SendOutput.Err <- errors.New("boom")
+
+			env := &events.Envelope{
+				EventType: events.Envelope_ContainerMetric.Enum(),
+				Origin:    proto.String("origin"),
+				ContainerMetric: &events.ContainerMetric{
+					ApplicationId: proto.String("app"),
+					InstanceIndex: proto.Int32(1),
+					CpuPercentage: proto.Float64(12.3),
+					MemoryBytes:   proto.Uint64(1),
+					DiskBytes:     proto.Uint64(1),
+				},
+			}
+
+			stop := make(chan struct{})
+			m.RegisterFirehose(&req, sender, stop)
+			m.SendTo("app", env)
+
+			Eventually(stop).Should(BeClosed())
 		})
 	})
 })

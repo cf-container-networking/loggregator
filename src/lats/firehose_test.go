@@ -15,96 +15,65 @@ import (
 )
 
 var _ = Describe("Firehose", func() {
+	Describe("subscription reconnect", func() {
+		It("gets all of the messages after reconnect", func() {
+			By("establishing first consumer")
+			reader, _ := helpers.SetUpConsumer()
+			subscriptionID := generateSubID()
+			msgs, errs := reader.FirehoseWithoutReconnect(subscriptionID, "")
+			go readFromErrors(errs)
+
+			By("waiting for connection to be established")
+			helpers.EmitToMetron(buildValueMetric("primer", 123.4))
+			<-msgs
+			reader.Close()
+
+			By("establishing second consumer with the same subscription id")
+			reader, _ = helpers.SetUpConsumer()
+			msgs, errs = reader.FirehoseWithoutReconnect(subscriptionID, "")
+			go readFromErrors(errs)
+
+			By("asserting that most messages get through")
+			count := 100
+			emitMetrics(count)
+			envelopes := readEnvelopes(2*time.Second, msgs)
+
+			Expect(len(envelopes)).To(BeNumerically("~", count, 3))
+			Expect(len(envelopes)).To(BeNumerically("<=", count))
+			Expect(verifyEnvelopes(envelopes)).To(BeTrue())
+		})
+	})
 
 	Describe("subscription sharding", func() {
-		Context("100 envelopes emitted", func() {
-			var (
-				count int
-			)
-
-			var generateSubID = func() string {
-				rand.Seed(time.Now().UnixNano())
-				return fmt.Sprintf("sub-%d", rand.Int())
-			}
-
-			var buildValueMetric = func(name string, value float64) *events.Envelope {
-				valueMetric := createValueMetric()
-				valueMetric.ValueMetric.Name = proto.String(name)
-				valueMetric.ValueMetric.Value = proto.Float64(value)
-				return valueMetric
-			}
-
-			var readFromErrors = func(errs <-chan error) {
-				defer GinkgoRecover()
-				Consistently(errs).ShouldNot(Receive())
-			}
-
-			var emitControlMessages = func() {
-				for i := 0; i < 20; i++ {
-					time.Sleep(10 * time.Millisecond)
-					helpers.EmitToMetron(buildValueMetric("controlValue", 0))
-				}
-			}
-
-			var waitForControl = func(msgs <-chan *events.Envelope) {
-				Eventually(msgs).Should(Receive())
-			}
-
-			var readEnvelopes = func(t time.Duration, msgs <-chan *events.Envelope) []*events.Envelope {
-				var envelopes []*events.Envelope
-				timer := time.NewTimer(t)
-				for {
-					select {
-					case <-timer.C:
-						return envelopes
-					case e := <-msgs:
-						if e.GetOrigin() == helpers.ORIGIN_NAME && e.ValueMetric.GetName() == "mainValue" {
-							envelopes = append(envelopes, e)
-						}
-					}
-				}
-			}
-
-			var verifyEnvelopes = func(count int, envelopes []*events.Envelope) bool {
-				sort.Sort(valueMetrics(envelopes))
-				var i float64
-				for _, e := range envelopes {
-					if e.ValueMetric.GetValue() < i {
-						return false
-					}
-					i = e.ValueMetric.GetValue() + 1
-				}
-
-				return true
-			}
+		Context("with 100 envelopes emitted", func() {
+			var count int
 
 			BeforeEach(func() {
 				count = 100
 			})
 
 			JustBeforeEach(func() {
-				for i := 0; i < count; i++ {
-					time.Sleep(10 * time.Millisecond)
-					helpers.EmitToMetron(buildValueMetric("mainValue", float64(i)))
-				}
+				emitMetrics(count)
 			})
 
-			Context("single connection", func() {
+			Context("with a single connection", func() {
 				var (
-					reader *consumer.Consumer
-					msgs   <-chan *events.Envelope
-					errs   <-chan error
+					reader         *consumer.Consumer
+					subscriptionID string
+					msgs           <-chan *events.Envelope
+					errs           <-chan error
 				)
+
+				BeforeEach(func() {
+					subscriptionID = generateSubID()
+					reader, _ = helpers.SetUpConsumer()
+					msgs, errs = reader.Firehose(subscriptionID, "")
+					go readFromErrors(errs)
+				})
 
 				JustBeforeEach(func() {
 					go emitControlMessages()
 					waitForControl(msgs)
-				})
-
-				BeforeEach(func() {
-					reader, _ = helpers.SetUpConsumer()
-					msgs, errs = reader.Firehose(generateSubID(), "")
-					go readFromErrors(errs)
 				})
 
 				AfterEach(func() {
@@ -116,11 +85,11 @@ var _ = Describe("Firehose", func() {
 
 					Expect(len(envelopes)).To(BeNumerically("~", count, 3))
 					Expect(len(envelopes)).To(BeNumerically("<=", count))
-					Expect(verifyEnvelopes(count, envelopes)).To(BeTrue())
+					Expect(verifyEnvelopes(envelopes)).To(BeTrue())
 				})
 			})
 
-			Context("multiple connections", func() {
+			Context("with multiple connections", func() {
 				var (
 					reader *consumer.Consumer
 					msgs1  <-chan *events.Envelope
@@ -152,7 +121,7 @@ var _ = Describe("Firehose", func() {
 					}
 				}
 
-				Context("single subscription ID", func() {
+				Context("with a single subscription ID", func() {
 					BeforeEach(func() {
 						subID := generateSubID()
 						reader, _ = helpers.SetUpConsumer()
@@ -175,12 +144,12 @@ var _ = Describe("Firehose", func() {
 						Expect(len(envelopes2)).To(BeNumerically("~", count/2, 15))
 
 						allEnvelopes := append(envelopes1, envelopes2...)
-						Expect(verifyEnvelopes(count, allEnvelopes)).To(BeTrue())
+						Expect(verifyEnvelopes(allEnvelopes)).To(BeTrue())
 					})
 				})
 
-				Context("2 subscription IDs", func() {
-					Context("1 connection per subscription", func() {
+				Context("with 2 subscription IDs", func() {
+					Context("with 1 connection per subscription", func() {
 						BeforeEach(func() {
 							subID1 := generateSubID()
 							subID2 := generateSubID()
@@ -206,12 +175,12 @@ var _ = Describe("Firehose", func() {
 							Expect(len(envelopes2)).To(BeNumerically("~", count, 3))
 							Expect(len(envelopes2)).To(BeNumerically("<=", count))
 
-							Expect(verifyEnvelopes(count, envelopes1)).To(BeTrue())
-							Expect(verifyEnvelopes(count, envelopes2)).To(BeTrue())
+							Expect(verifyEnvelopes(envelopes1)).To(BeTrue())
+							Expect(verifyEnvelopes(envelopes2)).To(BeTrue())
 						})
 					})
 
-					Context("2 connections per subscription", func() {
+					Context("with 2 connections per subscription", func() {
 						var (
 							// Subscription A
 							msgsA1 <-chan *events.Envelope
@@ -298,11 +267,11 @@ var _ = Describe("Firehose", func() {
 
 							By("subscription A")
 							allEnvelopesA := append(envelopes[0], envelopes[1]...)
-							Expect(verifyEnvelopes(count, allEnvelopesA)).To(BeTrue())
+							Expect(verifyEnvelopes(allEnvelopesA)).To(BeTrue())
 
 							By("subscription B")
 							allEnvelopesB := append(envelopes[2], envelopes[3]...)
-							Expect(verifyEnvelopes(count, allEnvelopesB)).To(BeTrue())
+							Expect(verifyEnvelopes(allEnvelopesB)).To(BeTrue())
 						})
 					})
 				})
@@ -326,4 +295,66 @@ func (m valueMetrics) Swap(i, j int) {
 	tmp := m[i]
 	m[i] = m[j]
 	m[j] = tmp
+}
+
+func generateSubID() string {
+	rand.Seed(time.Now().UnixNano())
+	return fmt.Sprintf("sub-%d", rand.Int())
+}
+
+func buildValueMetric(name string, value float64) *events.Envelope {
+	valueMetric := createValueMetric()
+	valueMetric.ValueMetric.Name = proto.String(name)
+	valueMetric.ValueMetric.Value = proto.Float64(value)
+	return valueMetric
+}
+
+func readFromErrors(errs <-chan error) {
+	defer GinkgoRecover()
+	Consistently(errs).ShouldNot(Receive())
+}
+
+func emitControlMessages() {
+	for i := 0; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
+		helpers.EmitToMetron(buildValueMetric("controlValue", 0))
+	}
+}
+
+func waitForControl(msgs <-chan *events.Envelope) {
+	Eventually(msgs).Should(Receive())
+}
+
+func readEnvelopes(t time.Duration, msgs <-chan *events.Envelope) []*events.Envelope {
+	var envelopes []*events.Envelope
+	timer := time.NewTimer(t)
+	for {
+		select {
+		case <-timer.C:
+			return envelopes
+		case e := <-msgs:
+			if e.GetOrigin() == helpers.ORIGIN_NAME && e.ValueMetric.GetName() == "mainValue" {
+				envelopes = append(envelopes, e)
+			}
+		}
+	}
+}
+
+func verifyEnvelopes(envelopes []*events.Envelope) bool {
+	sort.Sort(valueMetrics(envelopes))
+	var i float64
+	for _, e := range envelopes {
+		if e.ValueMetric.GetValue() < i {
+			return false
+		}
+		i = e.ValueMetric.GetValue() + 1
+	}
+	return true
+}
+
+func emitMetrics(count int) {
+	for i := 0; i < count; i++ {
+		time.Sleep(10 * time.Millisecond)
+		helpers.EmitToMetron(buildValueMetric("mainValue", float64(i)))
+	}
 }

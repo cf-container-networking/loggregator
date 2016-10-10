@@ -22,7 +22,7 @@ type OneToOne struct {
 	alerter    Alerter
 }
 
-var NewOneToOne = func(size int, alerter Alerter) *OneToOne {
+func NewOneToOne(size int, alerter Alerter) *OneToOne {
 	d := &OneToOne{
 		buffer:  make([]unsafe.Pointer, size),
 		alerter: alerter,

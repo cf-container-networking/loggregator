@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/cloudfoundry/dropsonde"
+	"github.com/cloudfoundry/dropsonde/logs"
 	"github.com/cloudfoundry/dropsonde/metric_sender"
 	"github.com/cloudfoundry/dropsonde/metrics"
+	"github.com/cloudfoundry/sonde-go/events"
 )
 
 var (
@@ -35,10 +37,7 @@ func main() {
 		// TODO: Add support for other event types as we add chaining APIs for
 		// those event types in NOAA.
 
-		//case "LogMessage":
 		//case "HttpStartStop":
-		//case "HttpStart":
-		//case "HttpStop":
 		//case "Error":
 
 		case "CounterEvent":
@@ -47,7 +46,10 @@ func main() {
 			sendValueMetric()
 		case "ContainerMetric":
 			sendContainerMetric()
+		case "LogMessage":
+			sendLogMessage()
 		default:
+			sendLogMessage()
 			sendCounterEvent()
 			sendValueMetric()
 			sendContainerMetric()
@@ -85,6 +87,14 @@ func sendValueMetric() {
 func sendContainerMetric() {
 	err := metrics.ContainerMetric("fake-app-id", 1, 58.2, 13, 41).
 		SetTag("example-tag", "foo").
+		Send()
+	if err != nil {
+		panic(err)
+	}
+}
+
+func sendLogMessage() {
+	err := logs.LogMessage([]byte("fake-log-message"), events.LogMessage_OUT).
 		Send()
 	if err != nil {
 		panic(err)
