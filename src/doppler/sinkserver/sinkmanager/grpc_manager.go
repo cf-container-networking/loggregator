@@ -123,8 +123,8 @@ func (s *bufferedGRPCSender) run() {
 				return
 			}
 		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	time.Sleep(10 * time.Millisecond)
 }
 
 func (s *bufferedGRPCSender) Send(resp *plumbing.Response) (err error) {
