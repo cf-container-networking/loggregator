@@ -49,6 +49,9 @@ properties:
   doppler.outgoing_port:
     description: "Port for outgoing doppler messages"
     default: 8081
+  doppler.uris:
+    description: "The URIs of the dopplers"
+    default: ~
 
   metron_endpoint.host:
     description: "The host used to emit messages to the Metron agent"

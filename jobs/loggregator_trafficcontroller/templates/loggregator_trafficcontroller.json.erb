@@ -46,6 +46,9 @@
         end
         a[:OutgoingDropsondePort] = p("loggregator.outgoing_dropsonde_port")
         a[:DopplerPort] = p("doppler.outgoing_port")
+        if_p("doppler.uris") do |uris|
+            a[:DopplerUris] = uris
+        end
         a[:SkipCertVerify] = p("ssl.skip_cert_verify")
         a[:ApiHost] = p("cc.srv_api_uri")
         a[:SystemDomain] = p("system_domain")

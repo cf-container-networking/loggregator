@@ -49,13 +49,16 @@ func (f *Fetcher) FetchStream(ctx context.Context, req *plumbing.StreamRequest, 
 
 	var result []Receiver
 	for _, conn := range f.grpcConns {
-		rx, err := conn.client.Stream(ctx, req, opts...)
-		if err != nil {
-			f.logger.Errorf("Stream() returned an error: %s", err)
-			return nil, err
+		builder := func() Receiver {
+			rx, err := conn.client.Stream(ctx, req, opts...)
+			if err != nil {
+				//			f.logger.Errorf("Stream() returned an error: %s", err)
+				return nil
+			}
+			return rx
 		}
 
-		result = append(result, rx)
+		result = append(result, NewRxWrapper(builder))
 	}
 
 	if len(result) == 0 {
@@ -71,13 +74,16 @@ func (f *Fetcher) FetchFirehose(ctx context.Context, req *plumbing.FirehoseReque
 
 	var result []Receiver
 	for _, conn := range f.grpcConns {
-		rx, err := conn.client.Firehose(ctx, req, opts...)
-		if err != nil {
-			f.logger.Errorf("Firehose() returned an error: %s", err)
-			return nil, err
+		builder := func() Receiver {
+			rx, err := conn.client.Firehose(ctx, req, opts...)
+			if err != nil {
+				//				f.logger.Errorf("Firehose() returned an error: %s", err)
+				return nil
+			}
+			return rx
 		}
 
-		result = append(result, rx)
+		result = append(result, NewRxWrapper(builder))
 	}
 
 	if len(result) == 0 {

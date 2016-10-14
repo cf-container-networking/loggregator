@@ -23,6 +23,7 @@ import (
 	"trafficcontroller/httpsetup"
 	"trafficcontroller/listener"
 	"trafficcontroller/middleware"
+	"trafficcontroller/staticfinder"
 	"trafficcontroller/uaa_client"
 
 	"code.cloudfoundry.org/localip"
@@ -125,7 +126,14 @@ func main() {
 		accessMiddleware = middleware.Access(accessLogger, ipAddress, config.OutgoingDropsondePort, log)
 	}
 
-	rxFetcher := grpcconnector.NewFetcher(config.GRPCPort, finder, log)
+	var grpcFinder grpcconnector.Finder
+	if len(config.DopplerUris) == 0 {
+		grpcFinder = finder
+	} else {
+		grpcFinder = staticfinder.New(config.DopplerUris)
+	}
+
+	rxFetcher := grpcconnector.NewFetcher(config.GRPCPort, grpcFinder, log)
 	grpcConnector := grpcconnector.New(rxFetcher, batcher, 5*time.Second, 1000)
 
 	dopplerCgc := channel_group_connector.NewChannelGroupConnector(finder, newDropsondeWebsocketListener, batcher, log)
