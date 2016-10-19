@@ -9,8 +9,8 @@ It is generated from these files:
 	plumbing.proto
 
 It has these top-level messages:
-	StreamRequest
-	FirehoseRequest
+	SubscriptionRequest
+	FilterRequest
 	Response
 	ContainerMetricsRequest
 	ContainerMetricsResponse
@@ -39,23 +39,31 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 
-type StreamRequest struct {
+type SubscriptionRequest struct {
+	ShardID string         `protobuf:"bytes,1,opt,name=shardID" json:"shardID,omitempty"`
+	Filter  *FilterRequest `protobuf:"bytes,2,opt,name=filter" json:"filter,omitempty"`
+}
+
+func (m *SubscriptionRequest) Reset()                    { *m = SubscriptionRequest{} }
+func (m *SubscriptionRequest) String() string            { return proto.CompactTextString(m) }
+func (*SubscriptionRequest) ProtoMessage()               {}
+func (*SubscriptionRequest) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{0} }
+
+func (m *SubscriptionRequest) GetFilter() *FilterRequest {
+	if m != nil {
+		return m.Filter
+	}
+	return nil
+}
+
+type FilterRequest struct {
 	AppID string `protobuf:"bytes,1,opt,name=appID" json:"appID,omitempty"`
 }
 
-func (m *StreamRequest) Reset()                    { *m = StreamRequest{} }
-func (m *StreamRequest) String() string            { return proto.CompactTextString(m) }
-func (*StreamRequest) ProtoMessage()               {}
-func (*StreamRequest) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{0} }
-
-type FirehoseRequest struct {
-	SubID string `protobuf:"bytes,1,opt,name=subID" json:"subID,omitempty"`
-}
-
-func (m *FirehoseRequest) Reset()                    { *m = FirehoseRequest{} }
-func (m *FirehoseRequest) String() string            { return proto.CompactTextString(m) }
-func (*FirehoseRequest) ProtoMessage()               {}
-func (*FirehoseRequest) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{1} }
+func (m *FilterRequest) Reset()                    { *m = FilterRequest{} }
+func (m *FilterRequest) String() string            { return proto.CompactTextString(m) }
+func (*FilterRequest) ProtoMessage()               {}
+func (*FilterRequest) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{1} }
 
 type Response struct {
 	Payload []byte `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
@@ -103,8 +111,8 @@ func (*RecentLogsResponse) ProtoMessage()               {}
 func (*RecentLogsResponse) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{6} }
 
 func init() {
-	proto.RegisterType((*StreamRequest)(nil), "plumbing.StreamRequest")
-	proto.RegisterType((*FirehoseRequest)(nil), "plumbing.FirehoseRequest")
+	proto.RegisterType((*SubscriptionRequest)(nil), "plumbing.SubscriptionRequest")
+	proto.RegisterType((*FilterRequest)(nil), "plumbing.FilterRequest")
 	proto.RegisterType((*Response)(nil), "plumbing.Response")
 	proto.RegisterType((*ContainerMetricsRequest)(nil), "plumbing.ContainerMetricsRequest")
 	proto.RegisterType((*ContainerMetricsResponse)(nil), "plumbing.ContainerMetricsResponse")
@@ -123,8 +131,7 @@ const _ = grpc.SupportPackageIsVersion3
 // Client API for Doppler service
 
 type DopplerClient interface {
-	Stream(ctx context.Context, in *StreamRequest, opts ...grpc.CallOption) (Doppler_StreamClient, error)
-	Firehose(ctx context.Context, in *FirehoseRequest, opts ...grpc.CallOption) (Doppler_FirehoseClient, error)
+	Subscribe(ctx context.Context, in *SubscriptionRequest, opts ...grpc.CallOption) (Doppler_SubscribeClient, error)
 	ContainerMetrics(ctx context.Context, in *ContainerMetricsRequest, opts ...grpc.CallOption) (*ContainerMetricsResponse, error)
 	RecentLogs(ctx context.Context, in *RecentLogsRequest, opts ...grpc.CallOption) (*RecentLogsResponse, error)
 }
@@ -137,12 +144,12 @@ func NewDopplerClient(cc *grpc.ClientConn) DopplerClient {
 	return &dopplerClient{cc}
 }
 
-func (c *dopplerClient) Stream(ctx context.Context, in *StreamRequest, opts ...grpc.CallOption) (Doppler_StreamClient, error) {
-	stream, err := grpc.NewClientStream(ctx, &_Doppler_serviceDesc.Streams[0], c.cc, "/plumbing.Doppler/Stream", opts...)
+func (c *dopplerClient) Subscribe(ctx context.Context, in *SubscriptionRequest, opts ...grpc.CallOption) (Doppler_SubscribeClient, error) {
+	stream, err := grpc.NewClientStream(ctx, &_Doppler_serviceDesc.Streams[0], c.cc, "/plumbing.Doppler/Subscribe", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &dopplerStreamClient{stream}
+	x := &dopplerSubscribeClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -152,48 +159,16 @@ func (c *dopplerClient) Stream(ctx context.Context, in *StreamRequest, opts ...g
 	return x, nil
 }
 
-type Doppler_StreamClient interface {
+type Doppler_SubscribeClient interface {
 	Recv() (*Response, error)
 	grpc.ClientStream
 }
 
-type dopplerStreamClient struct {
+type dopplerSubscribeClient struct {
 	grpc.ClientStream
 }
 
-func (x *dopplerStreamClient) Recv() (*Response, error) {
-	m := new(Response)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
-func (c *dopplerClient) Firehose(ctx context.Context, in *FirehoseRequest, opts ...grpc.CallOption) (Doppler_FirehoseClient, error) {
-	stream, err := grpc.NewClientStream(ctx, &_Doppler_serviceDesc.Streams[1], c.cc, "/plumbing.Doppler/Firehose", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &dopplerFirehoseClient{stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-type Doppler_FirehoseClient interface {
-	Recv() (*Response, error)
-	grpc.ClientStream
-}
-
-type dopplerFirehoseClient struct {
-	grpc.ClientStream
-}
-
-func (x *dopplerFirehoseClient) Recv() (*Response, error) {
+func (x *dopplerSubscribeClient) Recv() (*Response, error) {
 	m := new(Response)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -222,8 +197,7 @@ func (c *dopplerClient) RecentLogs(ctx context.Context, in *RecentLogsRequest, o
 // Server API for Doppler service
 
 type DopplerServer interface {
-	Stream(*StreamRequest, Doppler_StreamServer) error
-	Firehose(*FirehoseRequest, Doppler_FirehoseServer) error
+	Subscribe(*SubscriptionRequest, Doppler_SubscribeServer) error
 	ContainerMetrics(context.Context, *ContainerMetricsRequest) (*ContainerMetricsResponse, error)
 	RecentLogs(context.Context, *RecentLogsRequest) (*RecentLogsResponse, error)
 }
@@ -232,45 +206,24 @@ func RegisterDopplerServer(s *grpc.Server, srv DopplerServer) {
 	s.RegisterService(&_Doppler_serviceDesc, srv)
 }
 
-func _Doppler_Stream_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(StreamRequest)
+func _Doppler_Subscribe_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscriptionRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(DopplerServer).Stream(m, &dopplerStreamServer{stream})
+	return srv.(DopplerServer).Subscribe(m, &dopplerSubscribeServer{stream})
 }
 
-type Doppler_StreamServer interface {
+type Doppler_SubscribeServer interface {
 	Send(*Response) error
 	grpc.ServerStream
 }
 
-type dopplerStreamServer struct {
+type dopplerSubscribeServer struct {
 	grpc.ServerStream
 }
 
-func (x *dopplerStreamServer) Send(m *Response) error {
-	return x.ServerStream.SendMsg(m)
-}
-
-func _Doppler_Firehose_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(FirehoseRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(DopplerServer).Firehose(m, &dopplerFirehoseServer{stream})
-}
-
-type Doppler_FirehoseServer interface {
-	Send(*Response) error
-	grpc.ServerStream
-}
-
-type dopplerFirehoseServer struct {
-	grpc.ServerStream
-}
-
-func (x *dopplerFirehoseServer) Send(m *Response) error {
+func (x *dopplerSubscribeServer) Send(m *Response) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -325,13 +278,8 @@ var _Doppler_serviceDesc = grpc.ServiceDesc{
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "Stream",
-			Handler:       _Doppler_Stream_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "Firehose",
-			Handler:       _Doppler_Firehose_Handler,
+			StreamName:    "Subscribe",
+			Handler:       _Doppler_Subscribe_Handler,
 			ServerStreams: true,
 		},
 	},
@@ -341,23 +289,24 @@ var _Doppler_serviceDesc = grpc.ServiceDesc{
 func init() { proto.RegisterFile("plumbing.proto", fileDescriptor0) }
 
 var fileDescriptor0 = []byte{
-	// 273 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x09, 0x6e, 0x88, 0x02, 0xff, 0x84, 0x92, 0x4f, 0x4b, 0xc3, 0x30,
-	0x18, 0xc6, 0xad, 0xe2, 0x56, 0x5f, 0xfc, 0xfb, 0x22, 0xac, 0x56, 0x0f, 0x1a, 0x14, 0xf5, 0x52,
-	0x45, 0xbd, 0x78, 0xf0, 0xe4, 0x10, 0x06, 0x7a, 0x89, 0x47, 0x4f, 0xe9, 0x7c, 0x99, 0x85, 0x2e,
-	0x89, 0x49, 0x7a, 0xf0, 0x33, 0xf9, 0x25, 0x85, 0x8e, 0x98, 0x5a, 0xb7, 0xf5, 0xf8, 0x90, 0xdf,
-	0xfb, 0x3c, 0xe5, 0x47, 0x61, 0x5b, 0x97, 0xd5, 0x34, 0x2f, 0xe4, 0x24, 0xd3, 0x46, 0x39, 0x85,
-	0xb1, 0xcf, 0xec, 0x0c, 0xb6, 0x5e, 0x9d, 0x21, 0x31, 0xe5, 0xf4, 0x59, 0x91, 0x75, 0xb8, 0x0f,
-	0xeb, 0x42, 0xeb, 0xd1, 0x30, 0x89, 0x8e, 0xa3, 0x8b, 0x0d, 0x3e, 0x0b, 0xec, 0x1c, 0x76, 0x9e,
-	0x0a, 0x43, 0x1f, 0xca, 0x52, 0x03, 0xb4, 0x55, 0x1e, 0xc0, 0x3a, 0xb0, 0x53, 0x88, 0x39, 0x59,
-	0xad, 0xa4, 0x25, 0x4c, 0xa0, 0xaf, 0xc5, 0x57, 0xa9, 0xc4, 0x7b, 0xcd, 0x6c, 0x72, 0x1f, 0xd9,
-	0x15, 0x0c, 0x1e, 0x95, 0x74, 0xa2, 0x90, 0x64, 0x5e, 0xc8, 0x99, 0x62, 0x6c, 0x97, 0xef, 0xdf,
-	0x41, 0xf2, 0xff, 0x60, 0xde, 0xcc, 0x5a, 0x73, 0xe6, 0x12, 0xf6, 0x38, 0x8d, 0x49, 0xba, 0x67,
-	0x35, 0xe9, 0x18, 0xc8, 0x00, 0x9b, 0x68, 0x57, 0xf5, 0xcd, 0xf7, 0x2a, 0xf4, 0x87, 0x4a, 0xeb,
-	0x92, 0x0c, 0xde, 0x43, 0x6f, 0xe6, 0x10, 0x07, 0xd9, 0xaf, 0xe8, 0x3f, 0x56, 0x53, 0x0c, 0x0f,
-	0xbe, 0x9c, 0xad, 0x5c, 0x47, 0xf8, 0x00, 0xb1, 0xf7, 0x8a, 0x07, 0x81, 0x69, 0xb9, 0x5e, 0x78,
-	0xfe, 0x06, 0xbb, 0x6d, 0x2d, 0x78, 0x12, 0xd8, 0x05, 0x8e, 0x53, 0xb6, 0x0c, 0xf1, 0xf5, 0x38,
-	0x02, 0x08, 0x4a, 0xf0, 0xb0, 0xf9, 0x09, 0x2d, 0xa7, 0xe9, 0xd1, 0xfc, 0x47, 0x5f, 0x95, 0xf7,
-	0xea, 0xdf, 0xee, 0xf6, 0x27, 0x00, 0x00, 0xff, 0xff, 0x7f, 0x0c, 0xbd, 0x3c, 0x88, 0x02, 0x00,
-	0x00,
+	// 290 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x09, 0x6e, 0x88, 0x02, 0xff, 0x84, 0x92, 0xcd, 0x4e, 0xc3, 0x30,
+	0x10, 0x84, 0x09, 0x88, 0xfe, 0x2c, 0x3f, 0x82, 0x05, 0xa9, 0x51, 0x01, 0xa9, 0x58, 0x20, 0x95,
+	0x4b, 0x8b, 0x0a, 0x4f, 0x00, 0x15, 0x52, 0x25, 0xb8, 0x98, 0x23, 0x17, 0x92, 0x74, 0x29, 0x96,
+	0x82, 0x6d, 0x6c, 0xe7, 0xc0, 0x83, 0x73, 0x47, 0x84, 0xb8, 0x09, 0x25, 0xb4, 0xc7, 0xc9, 0x4e,
+	0xbe, 0xf1, 0x8e, 0x0d, 0xbb, 0x3a, 0xcd, 0xde, 0x62, 0x21, 0x67, 0x03, 0x6d, 0x94, 0x53, 0xd8,
+	0xf2, 0x9a, 0x3d, 0xc3, 0xc1, 0x63, 0x16, 0xdb, 0xc4, 0x08, 0xed, 0x84, 0x92, 0x9c, 0xde, 0x33,
+	0xb2, 0x0e, 0x43, 0x68, 0xda, 0xd7, 0xc8, 0x4c, 0x27, 0xe3, 0x30, 0xe8, 0x05, 0xfd, 0x36, 0xf7,
+	0x12, 0x87, 0xd0, 0x78, 0x11, 0xa9, 0x23, 0x13, 0xae, 0xf7, 0x82, 0xfe, 0xd6, 0xa8, 0x33, 0x98,
+	0xb3, 0xef, 0xf2, 0xef, 0x05, 0x82, 0x17, 0x36, 0x76, 0x0e, 0x3b, 0xbf, 0x06, 0x78, 0x08, 0x9b,
+	0x91, 0xd6, 0x73, 0xf2, 0x8f, 0x60, 0x67, 0xd0, 0xe2, 0x64, 0xb5, 0x92, 0x96, 0xbe, 0xd3, 0x75,
+	0xf4, 0x91, 0xaa, 0x68, 0x9a, 0x7b, 0xb6, 0xb9, 0x97, 0x6c, 0x08, 0x9d, 0x5b, 0x25, 0x5d, 0x24,
+	0x24, 0x99, 0x07, 0x72, 0x46, 0x24, 0x76, 0x39, 0xf6, 0x1a, 0xc2, 0xbf, 0x3f, 0xd4, 0xc5, 0x6c,
+	0x54, 0x63, 0x2e, 0x60, 0x9f, 0x53, 0x42, 0xd2, 0xdd, 0xab, 0xd9, 0x8a, 0x80, 0x01, 0x60, 0xd5,
+	0xba, 0x0a, 0x3d, 0xfa, 0x0c, 0xa0, 0x39, 0x56, 0x5a, 0xa7, 0x64, 0xf0, 0x06, 0xda, 0x45, 0xf9,
+	0x31, 0xe1, 0x49, 0x59, 0x64, 0xcd, 0x8d, 0x74, 0xb1, 0x1c, 0xfb, 0x14, 0xb6, 0x76, 0x19, 0xe0,
+	0x13, 0xec, 0x2d, 0x2e, 0x88, 0xa7, 0xa5, 0xf7, 0x9f, 0xb6, 0xba, 0x6c, 0x99, 0xc5, 0xe3, 0x71,
+	0x02, 0x50, 0x2e, 0x87, 0x47, 0xd5, 0x23, 0x2c, 0xb4, 0xd3, 0x3d, 0xae, 0x1f, 0x7a, 0x54, 0xdc,
+	0xc8, 0x5f, 0xde, 0xd5, 0x57, 0x00, 0x00, 0x00, 0xff, 0xff, 0x82, 0x4c, 0x73, 0xa6, 0x8b, 0x02,
+	0x00, 0x00,
 }

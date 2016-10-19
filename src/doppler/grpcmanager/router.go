@@ -2,35 +2,33 @@ package grpcmanager
 
 import (
 	"math/rand"
+	"plumbing"
 	"sync"
 
 	"github.com/cloudfoundry/sonde-go/events"
 )
 
 type Router struct {
-	lock      sync.RWMutex
-	streams   map[string][]DataSetter
-	firehoses map[string][]DataSetter
+	lock sync.RWMutex
+
+	// First Key is AppID, Second Key is ShardID
+	// Empty AppID means no filter
+	subscriptions map[string]map[string][]DataSetter
 }
 
 func NewRouter() *Router {
 	return &Router{
-		streams:   make(map[string][]DataSetter),
-		firehoses: make(map[string][]DataSetter),
+		subscriptions: make(map[string]map[string][]DataSetter),
 	}
 }
 
-func (r *Router) Register(ID string, isFirehose bool, dataSetter DataSetter) (cleanup func()) {
+func (r *Router) Register(req *plumbing.SubscriptionRequest, dataSetter DataSetter) (cleanup func()) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	r.registerSetter(ID, isFirehose, dataSetter)
+	r.registerSetter(req, dataSetter)
 
-	if isFirehose {
-		return r.buildCleanup(ID, dataSetter, r.firehoses)
-	}
-
-	return r.buildCleanup(ID, dataSetter, r.streams)
+	return r.buildCleanup(req, dataSetter)
 }
 
 func (r *Router) SendTo(appID string, envelope *events.Envelope) {
@@ -43,41 +41,68 @@ func (r *Router) SendTo(appID string, envelope *events.Envelope) {
 		return
 	}
 
-	for _, setter := range r.streams[appID] {
-		setter.Set(data)
+	for shardID, setters := range r.subscriptions[appID] {
+		r.writeToShard(shardID, setters, data)
 	}
 
-	for _, setters := range r.firehoses {
-		setters[rand.Intn(len(setters))].Set(data)
+	for shardID, setters := range r.subscriptions[""] {
+		r.writeToShard(shardID, setters, data)
 	}
 }
 
-func (r *Router) registerSetter(ID string, isFirehose bool, dataSetter DataSetter) {
-	if isFirehose {
-		r.firehoses[ID] = append(r.firehoses[ID], dataSetter)
+func (r *Router) writeToShard(shardID string, setters []DataSetter, data []byte) {
+	if shardID == "" {
+		for _, setter := range setters {
+			setter.Set(data)
+		}
 		return
 	}
 
-	r.streams[ID] = append(r.streams[ID], dataSetter)
+	setters[rand.Intn(len(setters))].Set(data)
 }
 
-func (r *Router) buildCleanup(ID string, dataSetter DataSetter, m map[string][]DataSetter) func() {
+func (r *Router) registerSetter(req *plumbing.SubscriptionRequest, dataSetter DataSetter) {
+	var appID string
+	if req.Filter != nil {
+		appID = req.Filter.AppID
+	}
+
+	m, ok := r.subscriptions[appID]
+	if !ok {
+		m = make(map[string][]DataSetter)
+		r.subscriptions[appID] = m
+	}
+
+	m[req.ShardID] = append(m[req.ShardID], dataSetter)
+}
+
+func (r *Router) buildCleanup(req *plumbing.SubscriptionRequest, dataSetter DataSetter) func() {
 	return func() {
 		r.lock.Lock()
 		defer r.lock.Unlock()
 
+		var appID string
+		if req.Filter != nil {
+			appID = req.Filter.AppID
+		}
+
 		var setters []DataSetter
-		for _, s := range m[ID] {
+		for _, s := range r.subscriptions[appID][req.ShardID] {
 			if s != dataSetter {
 				setters = append(setters, s)
 			}
 		}
 
 		if len(setters) > 0 {
-			m[ID] = setters
+			r.subscriptions[appID][req.ShardID] = setters
 			return
 		}
-		delete(m, ID)
+
+		delete(r.subscriptions[appID], req.ShardID)
+
+		if len(r.subscriptions[appID]) == 0 {
+			delete(r.subscriptions, appID)
+		}
 	}
 }
 
